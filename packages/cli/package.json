@@ -1,7 +1,16 @@
 {
   "name": "litoho",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phatysddev/litoho.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://github.com/phatysddev/litoho/tree/main/packages/cli#readme",
+  "bugs": {
+    "url": "https://github.com/phatysddev/litoho/issues"
+  },
   "bin": {
     "litoho": "./dist/index.js"
   },

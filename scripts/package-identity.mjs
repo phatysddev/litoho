@@ -135,6 +135,7 @@ function rewriteScriptMap(scripts, options) {
 
     scripts[key] = value
       .replaceAll("pnpm exec litoho ", `pnpm exec ${options.cliBin} `)
+      .replaceAll("npm exec litoho -- ", `npm exec ${options.cliBin} -- `)
       .replaceAll("npx litoho ", `npx ${options.cliPackage} `);
   }
 }
@@ -149,6 +150,7 @@ function rewriteText(source, options) {
     .replaceAll('process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho"', `process.env.LITOHO_CLI_PACKAGE?.trim() || "${options.cliPackage}"`)
     .replaceAll('process.env.LITOHO_CLI_BIN?.trim() || "litoho"', `process.env.LITOHO_CLI_BIN?.trim() || "${options.cliBin}"`)
     .replaceAll("pnpm exec litoho ", `pnpm exec ${options.cliBin} `)
+    .replaceAll("npm exec litoho -- ", `npm exec ${options.cliBin} -- `)
     .replaceAll("npx litoho ", `npx ${options.cliPackage} `);
 }
 

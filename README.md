@@ -147,10 +147,10 @@ The default local URL is `http://localhost:3000`.
 From the repo root:
 
 ```bash
-pnpm exec litoho new my-app
+npx litoho new my-app
 cd my-app
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 Generated apps include:
@@ -163,7 +163,7 @@ Generated apps include:
 
 ## CLI
 
-Main commands available in `0.0.1`:
+Main commands available in `0.0.2`:
 
 ```bash
 litoho new <name>

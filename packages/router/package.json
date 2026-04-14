@@ -1,7 +1,16 @@
 {
   "name": "@litoho/router",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/phatysddev/litoho.git",
+    "directory": "packages/router"
+  },
+  "homepage": "https://github.com/phatysddev/litoho/tree/main/packages/router#readme",
+  "bugs": {
+    "url": "https://github.com/phatysddev/litoho/issues"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {

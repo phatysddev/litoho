@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const LITOHO_VERSION = "^0.0.1";
+const LITOHO_VERSION = "^0.0.2";
 const LITOHO_SCOPE = process.env.LITOHO_SCOPE?.trim() || "@litoho";
 const LITOHO_CLI_PACKAGE = process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho";
 const LITOHO_CLI_BIN = process.env.LITOHO_CLI_BIN?.trim() || "litoho";
@@ -108,10 +108,10 @@ export function createNewApp(rootDir: string) {
           private: true,
           type: "module",
           scripts: {
-            "generate:routes": `pnpm exec ${LITOHO_CLI_BIN} generate routes --root .`,
-            dev: `pnpm exec ${LITOHO_CLI_BIN} dev --root .`,
-            build: `pnpm exec ${LITOHO_CLI_BIN} build --root .`,
-            start: `pnpm exec ${LITOHO_CLI_BIN} start --root .`
+            "generate:routes": `npm exec ${LITOHO_CLI_BIN} -- generate routes --root .`,
+            dev: `npm exec ${LITOHO_CLI_BIN} -- dev --root .`,
+            build: `npm exec ${LITOHO_CLI_BIN} -- build --root .`,
+            start: `npm exec ${LITOHO_CLI_BIN} -- start --root .`
           },
           dependencies: {
             [scopedPackage("app")]: LITOHO_VERSION,

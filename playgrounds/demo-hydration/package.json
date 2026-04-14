@@ -3,10 +3,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate:routes": "pnpm exec litoho generate routes --root .",
-    "dev": "pnpm exec litoho dev --root .",
-    "build": "pnpm exec litoho build --root .",
-    "start": "pnpm exec litoho start --root ."
+    "generate:routes": "npm exec litoho -- generate routes --root .",
+    "dev": "npm exec litoho -- dev --root .",
+    "build": "npm exec litoho -- build --root .",
+    "start": "npm exec litoho -- start --root ."
   },
   "dependencies": {
     "@litoho/app": "workspace:*",
