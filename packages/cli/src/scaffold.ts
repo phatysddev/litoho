@@ -1,6 +1,18 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
+const LITO_VERSION = "^0.0.1";
+const LITO_SCOPE = process.env.LITO_SCOPE?.trim() || "@lito";
+const LITO_CLI_PACKAGE = process.env.LITO_CLI_PACKAGE?.trim() || "lito";
+const LITO_CLI_BIN = process.env.LITO_CLI_BIN?.trim() || "lito";
+
+function scopedPackage(name: string) {
+  return `${LITO_SCOPE}/${name}`;
+}
+
+const APP_PACKAGE = scopedPackage("app");
+const SERVER_PACKAGE = scopedPackage("server");
+
 export function createPageFile(rootDir: string, routePath: string, options: { mode?: "client" | "server" } = {}) {
   const targetFile = resolve(rootDir, "app/pages", normalizePagePath(routePath));
   ensureParentDirectory(targetFile);
@@ -14,7 +26,7 @@ export function createPageFile(rootDir: string, routePath: string, options: { mo
   writeFileSync(
     targetFile,
     `${directive}import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -65,7 +77,7 @@ export function createLayoutFile(rootDir: string, layoutPath: string) {
 
   writeFileSync(
     targetFile,
-    `import type { LitoLayoutModule } from "@lito/app";
+    `import type { LitoLayoutModule } from "${APP_PACKAGE}";
 
 const layout: LitoLayoutModule = {
   render: ({ children }) => children
@@ -96,19 +108,19 @@ export function createNewApp(rootDir: string) {
           private: true,
           type: "module",
           scripts: {
-            "generate:routes": "pnpm --filter @lito/cli build && pnpm exec lito generate routes --root .",
-            dev: "pnpm exec lito dev --root .",
-            build: "pnpm exec lito build --root .",
-            start: "pnpm exec lito start --root ."
+            "generate:routes": `pnpm exec ${LITO_CLI_BIN} generate routes --root .`,
+            dev: `pnpm exec ${LITO_CLI_BIN} dev --root .`,
+            build: `pnpm exec ${LITO_CLI_BIN} build --root .`,
+            start: `pnpm exec ${LITO_CLI_BIN} start --root .`
           },
           dependencies: {
-            "@lito/app": "workspace:*",
-            "@lito/server": "workspace:*",
+            [scopedPackage("app")]: LITO_VERSION,
+            [scopedPackage("core")]: LITO_VERSION,
+            [scopedPackage("server")]: LITO_VERSION,
             "lit": "^3.2.0"
           },
           devDependencies: {
-            "@lito/cli": "workspace:*"
-            ,
+            [LITO_CLI_PACKAGE]: LITO_VERSION,
             "tsx": "^4.19.2",
             "typescript": "^5.8.3",
             "vite": "^5.4.19"
@@ -211,7 +223,7 @@ export default defineConfig({
   if (!existsSync(mainEntryPath)) {
     writeFileSync(
       mainEntryPath,
-      `import { bootLitoClient } from "@lito/app";\nimport { pageManifest } from "./generated/page-manifest.js";\n\nbootLitoClient({ pageManifest });\n`
+      `import { bootLitoClient } from "${APP_PACKAGE}";\nimport { pageManifest } from "./generated/page-manifest.js";\n\nbootLitoClient({ pageManifest });\n`
     );
   }
 
@@ -219,9 +231,9 @@ export default defineConfig({
   if (!existsSync(serverEntryPath)) {
     writeFileSync(
       serverEntryPath,
-      `import { scanApiRoutesFromManifest, scanPageRoutesFromManifest } from "@lito/app";
+      `import { scanApiRoutesFromManifest, scanPageRoutesFromManifest } from "${APP_PACKAGE}";
 import { resolve } from "node:path";
-import { startLitoNodeApp } from "@lito/server";
+import { startLitoNodeApp } from "${SERVER_PACKAGE}";
 import { apiModulePaths } from "./src/generated/api-manifest";
 import { pageManifest } from "./src/generated/page-manifest";
 
@@ -254,7 +266,7 @@ console.log(\`Lito app is running at http://localhost:\${process.env.PORT ?? 300
     writeFileSync(
       indexPagePath,
       `import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -278,7 +290,7 @@ export default page;
     writeFileSync(
       rootLayoutPath,
       `import { html } from "lit";
-import type { LitoLayoutModule } from "@lito/app";
+import type { LitoLayoutModule } from "${APP_PACKAGE}";
 
 const layout: LitoLayoutModule<{ appName: string }> = {
   load: () => ({
@@ -329,7 +341,7 @@ export function createCrudResource(rootDir: string, resourceName: string) {
   overwriteFile(
     resolve(rootDir, "app/pages", `${baseName}/_index.ts`),
     `import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -354,7 +366,7 @@ export default page;
   overwriteFile(
     resolve(rootDir, "app/pages", `${baseName}/new/_index.ts`),
     `import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -375,7 +387,7 @@ export default page;
   overwriteFile(
     resolve(rootDir, "app/pages", `${baseName}/[id]/_index.ts`),
     `import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -397,7 +409,7 @@ export default page;
   overwriteFile(
     resolve(rootDir, "app/pages", `${baseName}/[id]/edit/_index.ts`),
     `import { html } from "lit";
-import type { LitoPageModule } from "@lito/app";
+import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
   document: {
@@ -417,7 +429,7 @@ export default page;
 
   overwriteFile(
     resolve(rootDir, "app/api", `${baseName}.ts`),
-    `import { defineApiRoute } from "@lito/server";
+    `import { defineApiRoute } from "${SERVER_PACKAGE}";
 
 const route = defineApiRoute({
   get: () =>
@@ -440,7 +452,7 @@ export default route;
 
   overwriteFile(
     resolve(rootDir, "app/api", `${baseName}/[id].ts`),
-    `import { defineApiRoute } from "@lito/server";
+    `import { defineApiRoute } from "${SERVER_PACKAGE}";
 
 type ${titleCase(baseName).replace(/\s+/g, "")}DetailParams = {
   id: string;
@@ -535,7 +547,7 @@ function createApiModuleTemplate(routePath: string, options: { queryFields?: Api
   const hasParams = params.length > 0;
   const hasQuery = queryFields.length > 0;
 
-  const imports = `import { defineApiRoute } from "@lito/server";`;
+  const imports = `import { defineApiRoute } from "${SERVER_PACKAGE}";`;
   const paramsTypeBlock = hasParams
     ? `\ntype ${paramsTypeName} = {\n${params.map((param) => `  ${param}: string;`).join("\n")}\n};\n`
     : "";

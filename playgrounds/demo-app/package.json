@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "generate:routes": "pnpm --filter @lito/cli build && pnpm exec lito generate routes --root .",
+    "generate:routes": "pnpm exec lito generate routes --root .",
     "dev": "pnpm exec lito dev --root .",
     "build": "pnpm exec lito build --root .",
     "start": "pnpm exec lito start --root ."
@@ -14,7 +14,7 @@
     "lit": "^3.2.0"
   },
   "devDependencies": {
-    "@lito/cli": "workspace:*",
+    "lito": "workspace:*",
     "tsx": "^4.19.2",
     "typescript": "^5.8.3",
     "vite": "^5.4.19"

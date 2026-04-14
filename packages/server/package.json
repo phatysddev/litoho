@@ -1,7 +1,6 @@
 {
   "name": "@lito/server",
-  "version": "0.1.0",
-  "private": true,
+  "version": "0.0.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -14,13 +13,16 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.0",
     "@lit-labs/ssr": "^3.3.1",
-    "@lito/router": "workspace:*",
+    "@lito/router": "^0.0.1",
     "hono": "^4.7.7",
     "vite": "^5.4.19"
   }

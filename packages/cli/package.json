@@ -1,7 +1,6 @@
 {
-  "name": "@lito/cli",
-  "version": "0.1.0",
-  "private": true,
+  "name": "lito",
+  "version": "0.0.1",
   "type": "module",
   "bin": {
     "lito": "./dist/index.js"
@@ -15,4 +14,3 @@
     "build": "tsc -p tsconfig.json"
   }
 }
-

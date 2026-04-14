@@ -59,7 +59,7 @@ planning/
   Route matching utilities for static and dynamic segments.
 - `@lito/server`
   Hono-based server runtime, SSR document rendering, typed API helpers, and Node integration.
-- `@lito/cli`
+- `lito`
   Project scaffolding, route manifest generation, dev/build/start commands, and doctor checks.
 - `@lito/testing`
   Test coverage for manifests, router behavior, SSR, and state primitives.
