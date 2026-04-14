@@ -1,0 +1,22 @@
+{
+  "name": "lito",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Lito monorepo scaffold",
+  "packageManager": "pnpm@10.0.0",
+  "workspaces": [
+    "packages/*",
+    "playgrounds/*"
+  ],
+  "scripts": {
+    "build": "tsc -b packages/core packages/router packages/server packages/app packages/cli packages/testing",
+    "typecheck": "tsc -b packages/core packages/router packages/server packages/app packages/cli packages/testing",
+    "test": "pnpm build && pnpm --filter @lito/testing test",
+    "clean": "rm -rf packages/*/dist playgrounds/*/dist"
+  },
+  "devDependencies": {
+    "@lito/cli": "workspace:*",
+    "@types/node": "^22.15.3",
+    "typescript": "^5.8.3"
+  }
+}

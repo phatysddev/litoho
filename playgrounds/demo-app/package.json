@@ -1,0 +1,22 @@
+{
+  "name": "demo-app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "generate:routes": "pnpm --filter @lito/cli build && pnpm exec lito generate routes --root .",
+    "dev": "pnpm exec lito dev --root .",
+    "build": "pnpm exec lito build --root .",
+    "start": "pnpm exec lito start --root ."
+  },
+  "dependencies": {
+    "@lito/app": "workspace:*",
+    "@lito/server": "workspace:*",
+    "lit": "^3.2.0"
+  },
+  "devDependencies": {
+    "@lito/cli": "workspace:*",
+    "tsx": "^4.19.2",
+    "typescript": "^5.8.3",
+    "vite": "^5.4.19"
+  }
+}
