@@ -1,13 +1,13 @@
 {
   "name": "@litoho/router",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "type": "module",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/phatysddev/litoho.git",
     "directory": "packages/router"
   },
-  "homepage": "https://github.com/phatysddev/litoho/tree/main/packages/router#readme",
+  "homepage": "https://github.com/phatysddev/litoho/blob/main/README.md",
   "bugs": {
     "url": "https://github.com/phatysddev/litoho/issues"
   },

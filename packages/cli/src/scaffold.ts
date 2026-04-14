@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 
-const LITOHO_VERSION = "^0.0.2";
+const LITOHO_VERSION = "^0.0.3";
 const LITOHO_SCOPE = process.env.LITOHO_SCOPE?.trim() || "@litoho";
 const LITOHO_CLI_PACKAGE = process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho";
 const LITOHO_CLI_BIN = process.env.LITOHO_CLI_BIN?.trim() || "litoho";

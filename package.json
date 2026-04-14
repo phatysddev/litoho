@@ -1,13 +1,13 @@
 {
   "name": "litoho-monorepo",
   "private": true,
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Litoho monorepo scaffold",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/phatysddev/litoho.git"
   },
-  "homepage": "https://github.com/phatysddev/litoho#readme",
+  "homepage": "https://github.com/phatysddev/litoho/blob/main/README.md",
   "bugs": {
     "url": "https://github.com/phatysddev/litoho/issues"
   },
