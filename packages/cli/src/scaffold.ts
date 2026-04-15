@@ -383,7 +383,6 @@ export function createNewApp(rootDir: string) {
             [scopedPackage("app")]: LITOHO_VERSION,
             [scopedPackage("core")]: LITOHO_VERSION,
             [scopedPackage("server")]: LITOHO_VERSION,
-            [scopedPackage("ui")]: LITOHO_VERSION,
             "lit": "^3.2.0"
           },
           devDependencies: {
@@ -456,7 +455,9 @@ export default defineConfig({
       name: "litoho-protect-api",
       enforce: "pre",
       resolveId(id, importer, options) {
-        if (!options?.ssr && (id.includes("/app/api/") || id.endsWith("/app/api"))) {
+        const isApiRouteImport = id.includes("/app/api/") || id.endsWith("/app/api");
+        const isClientModuleImporter = typeof importer === "string" && /[.][cm]?[jt]sx?$/.test(importer);
+        if (!options?.ssr && isApiRouteImport && isClientModuleImporter) {
           throw new Error(\`\\n\\n[LITOHO] Protection Error:\\nCannot import backend API route '\${id}' in a Client context!\\n(Imported by \${importer})\\n\\n\`);
         }
       }
@@ -568,8 +569,7 @@ console.log(\`Litoho app is running at http://localhost:\${process.env.PORT ?? 3
   if (!existsSync(indexPagePath)) {
     writeFileSync(
       indexPagePath,
-      `import "@litoho/ui";
-import { html } from "lit";
+      `import { html } from "lit";
 import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
@@ -608,23 +608,33 @@ const page: LitoPageModule = {
           </div>
         </div>
 
-        <lui-card>
-          <lui-card-header>
-            <lui-badge variant="soft">Starter stack</lui-badge>
-            <lui-card-title>Tailwind + Lit + UI primitives</lui-card-title>
-            <lui-card-description>
-              The default scaffold now ships with <code>@litoho/ui</code> so you can compose real interface pieces right
-              away.
-            </lui-card-description>
-          </lui-card-header>
-          <lui-card-content>
-            <lui-input placeholder="Name your first view"></lui-input>
-          </lui-card-content>
-          <lui-card-footer>
-            <lui-button href="/api/health">Health API</lui-button>
-            <lui-button variant="outline" href="https://tailwindcss.com/docs/installation/using-vite">Tailwind docs</lui-button>
-          </lui-card-footer>
-        </lui-card>
+        <aside class="rounded-3xl border border-white/10 bg-white/5 p-6 backdrop-blur">
+          <p class="text-xs uppercase tracking-[0.3em] text-lito-gold">Starter stack</p>
+          <h2 class="mt-3 text-2xl font-semibold text-white">Tailwind + Lit</h2>
+          <p class="mt-3 text-sm leading-7 text-slate-300">
+            Start with framework primitives first, then layer your own design system or external UI package when needed.
+          </p>
+          <div class="mt-5 space-y-3">
+            <input
+              class="w-full rounded-xl border border-white/15 bg-slate-900/70 px-4 py-3 text-sm text-white placeholder:text-slate-400"
+              placeholder="Name your first view"
+            />
+            <div class="flex flex-wrap gap-3">
+              <a
+                class="inline-flex min-h-11 items-center justify-center rounded-full bg-lito-gold px-5 text-sm font-semibold text-lito-ink transition hover:-translate-y-0.5"
+                href="/api/health"
+              >
+                Health API
+              </a>
+              <a
+                class="inline-flex min-h-11 items-center justify-center rounded-full border border-white/20 px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5"
+                href="https://tailwindcss.com/docs/installation/using-vite"
+              >
+                Tailwind docs
+              </a>
+            </div>
+          </div>
+        </aside>
       </section>
     </main>
   \`

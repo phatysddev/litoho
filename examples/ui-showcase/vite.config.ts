@@ -23,7 +23,9 @@ export default defineConfig({
       name: "litoho-protect-api",
       enforce: "pre",
       resolveId(id, importer, options) {
-        if (!options?.ssr && (id.includes("/app/api/") || id.endsWith("/app/api"))) {
+        const isApiRouteImport = id.includes("/app/api/") || id.endsWith("/app/api");
+        const isClientModuleImporter = typeof importer === "string" && /[.][cm]?[jt]sx?$/.test(importer);
+        if (!options?.ssr && isApiRouteImport && isClientModuleImporter) {
           throw new Error(`\n\n[LITOHO] Protection Error:\nCannot import backend API route '${id}' in a Client context!\n(Imported by ${importer})\n\n`);
         }
       }
