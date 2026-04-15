@@ -22,9 +22,13 @@
     "typecheck": "tsc -b packages/core packages/router packages/server packages/app packages/cli packages/testing",
     "test": "pnpm build && pnpm --filter @litoho/testing test",
     "clean": "rm -rf packages/*/dist playgrounds/*/dist examples/*/dist",
+    "release:bump": "node scripts/bump-version.mjs patch",
     "release:preflight": "node scripts/release-preflight.mjs",
     "release:pack": "node scripts/publish-packages.mjs --dry-run",
     "release:publish": "node scripts/publish-packages.mjs",
+    "release:publish:minor": "node scripts/publish-packages.mjs --bump minor",
+    "release:publish:major": "node scripts/publish-packages.mjs --bump major",
+    "release:publish:no-git": "LITOHO_AUTO_GIT=false node scripts/publish-packages.mjs",
     "identity:preview": "node scripts/package-identity.mjs --preview",
     "identity:apply": "node scripts/package-identity.mjs --apply"
   },

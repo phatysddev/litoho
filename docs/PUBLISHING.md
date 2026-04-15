@@ -79,6 +79,40 @@ LITOHO_CLI_BIN=litoho \
 pnpm run release:publish
 ```
 
+`release:publish` now auto-bumps the monorepo version before publishing.
+
+- default bump: `patch`
+- optional env override: `LITOHO_BUMP=minor` or `LITOHO_BUMP=major`
+- optional CLI override: `pnpm run release:publish -- --bump minor`
+- after a successful publish, Litoho also updates `CHANGELOG.md`, creates a release commit, and creates an annotated git tag by default
+
+Convenience scripts:
+
+```bash
+pnpm run release:publish
+pnpm run release:publish:minor
+pnpm run release:publish:major
+pnpm run release:publish:no-git
+```
+
+If you need to skip the auto-bump for a one-off release:
+
+```bash
+LITOHO_AUTO_BUMP=false pnpm run release:publish
+```
+
+If you need to skip the git commit and tag automation:
+
+```bash
+LITOHO_AUTO_GIT=false pnpm run release:publish
+```
+
+If your worktree is dirty, publish now stops before doing anything. You can override that guard, but it is not recommended:
+
+```bash
+LITOHO_ALLOW_DIRTY=true pnpm run release:publish
+```
+
 ## Unscoped CLI vs Scoped CLI
 
 If npm allows the unscoped package name:
