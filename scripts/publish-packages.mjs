@@ -1,4 +1,4 @@
-import { cpSync, mkdtempSync, symlinkSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, symlinkSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -11,7 +11,8 @@ const scope = process.env.LITOHO_SCOPE?.trim() || "@litoho";
 const cliPackageName = process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho";
 const cliBin = process.env.LITOHO_CLI_BIN?.trim() || "litoho";
 const cliAccess = cliPackageName.startsWith("@") ? "public" : undefined;
-const releaseRoot = createReleaseWorkspace();
+const hasBuildToolchain = canBuildFromSource();
+const releaseRoot = createReleaseWorkspace({ includeDist: !hasBuildToolchain });
 
 const packages = [
   { dir: "packages/router", label: `${scope}/router`, access: "public" },
@@ -21,7 +22,20 @@ const packages = [
   { dir: "packages/cli", label: cliPackageName, access: cliAccess }
 ];
 
-exec("pnpm", ["build"], releaseRoot);
+if (hasBuildToolchain) {
+  exec("pnpm", ["build"], releaseRoot);
+} else {
+  console.warn(`
+[Litoho publish warning]
+TypeScript build toolchain was not found locally (${resolve(rootDir, "node_modules/.bin/tsc")}).
+The release workspace will reuse the existing checked-in dist files instead of rebuilding from source.
+
+If you want a fresh build before publishing:
+- run pnpm install
+- run pnpm build
+`);
+}
+
 applyPackageIdentity({
   rootDir: releaseRoot,
   scope,
@@ -60,22 +74,37 @@ function exec(command, args, cwd) {
   });
 }
 
-function createReleaseWorkspace() {
+function createReleaseWorkspace(options = { includeDist: false }) {
   const tempRoot = mkdtempSync(join(tmpdir(), "litoho-release-"));
 
   cpSync(resolve(rootDir, "packages"), resolve(tempRoot, "packages"), {
     recursive: true,
-    filter: (source) => !source.includes("/dist/") && !source.endsWith(".tsbuildinfo")
+    filter: (source) => {
+      if (!options.includeDist && source.includes("/dist/")) {
+        return false;
+      }
+
+      return !source.endsWith(".tsbuildinfo");
+    }
   });
   cpSync(resolve(rootDir, "scripts"), resolve(tempRoot, "scripts"), {
     recursive: true,
     filter: (source) => !source.endsWith("publish-packages.mjs")
   });
   cpSync(resolve(rootDir, "package.json"), resolve(tempRoot, "package.json"));
+  if (existsSync(resolve(rootDir, "pnpm-workspace.yaml"))) {
+    cpSync(resolve(rootDir, "pnpm-workspace.yaml"), resolve(tempRoot, "pnpm-workspace.yaml"));
+  }
   cpSync(resolve(rootDir, "tsconfig.base.json"), resolve(tempRoot, "tsconfig.base.json"));
-  symlinkSync(resolve(rootDir, "node_modules"), resolve(tempRoot, "node_modules"), "dir");
+  if (existsSync(resolve(rootDir, "node_modules"))) {
+    symlinkSync(resolve(rootDir, "node_modules"), resolve(tempRoot, "node_modules"), "dir");
+  }
 
   return tempRoot;
+}
+
+function canBuildFromSource() {
+  return existsSync(resolve(rootDir, "node_modules/.bin/tsc"));
 }
 
 function printPublishHelp(packageName) {
