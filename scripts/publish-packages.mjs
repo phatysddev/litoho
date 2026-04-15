@@ -31,6 +31,7 @@ const releaseRoot = createReleaseWorkspace({ includeDist: !hasBuildToolchain });
 const packages = [
   { dir: "packages/router", label: `${scope}/router`, access: "public" },
   { dir: "packages/core", label: `${scope}/core`, access: "public" },
+  { dir: "packages/ui", label: `${scope}/ui`, access: "public" },
   { dir: "packages/server", label: `${scope}/server`, access: "public" },
   { dir: "packages/app", label: `${scope}/app`, access: "public" },
   { dir: "packages/cli", label: cliPackageName, access: cliAccess }

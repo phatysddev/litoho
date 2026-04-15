@@ -18,8 +18,8 @@
     "examples/*"
   ],
   "scripts": {
-    "build": "tsc -b packages/core packages/router packages/server packages/app packages/cli packages/testing",
-    "typecheck": "tsc -b packages/core packages/router packages/server packages/app packages/cli packages/testing",
+    "build": "tsc -b packages/core packages/router packages/ui packages/server packages/app packages/cli packages/testing",
+    "typecheck": "tsc -b packages/core packages/router packages/ui packages/server packages/app packages/cli packages/testing",
     "test": "pnpm build && pnpm --filter @litoho/testing test",
     "clean": "rm -rf packages/*/dist playgrounds/*/dist examples/*/dist",
     "release:bump": "node scripts/bump-version.mjs patch",

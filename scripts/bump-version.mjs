@@ -10,6 +10,7 @@ const packageJsonFiles = [
   "packages/app/package.json",
   "packages/cli/package.json",
   "packages/core/package.json",
+  "packages/ui/package.json",
   "packages/router/package.json",
   "packages/server/package.json",
   "packages/testing/package.json",
@@ -19,7 +20,8 @@ const packageJsonFiles = [
   "examples/crud-resource/package.json",
   "examples/fullstack-crud/package.json",
   "examples/middleware-lab/package.json",
-  "examples/state-patterns/package.json"
+  "examples/state-patterns/package.json",
+  "examples/ui-showcase/package.json"
 ];
 
 const textFiles = [
@@ -83,6 +85,7 @@ function rewriteDependencyMap(dependencies, fromVersion, toVersion) {
     if (
       name === "@litoho/app" ||
       name === "@litoho/core" ||
+      name === "@litoho/ui" ||
       name === "@litoho/router" ||
       name === "@litoho/server" ||
       name === "litoho"

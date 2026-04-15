@@ -18,6 +18,11 @@ const packages = [
     distFiles: ["dist/index.js", "dist/index.d.ts"]
   },
   {
+    dir: "packages/ui",
+    expectedName: `${scope}/ui`,
+    distFiles: ["dist/index.js", "dist/index.d.ts"]
+  },
+  {
     dir: "packages/server",
     expectedName: `${scope}/server`,
     distFiles: ["dist/index.js", "dist/index.d.ts"]

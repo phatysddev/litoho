@@ -15,13 +15,15 @@ const packageJsonFiles = new Set([
   "package.json",
   "packages/app/package.json",
   "packages/core/package.json",
+  "packages/ui/package.json",
   "packages/router/package.json",
   "packages/server/package.json",
   "packages/cli/package.json",
   "packages/testing/package.json",
   "playgrounds/demo-app/package.json",
   "playgrounds/demo-hydration/package.json",
-  "playgrounds/demo-state/package.json"
+  "playgrounds/demo-state/package.json",
+  "examples/ui-showcase/package.json"
 ]);
 
 if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith("/package-identity.mjs")) {
@@ -71,6 +73,10 @@ function rewritePackageJson(source, relativePath, options) {
     json.name = options.scope + "/core";
   }
 
+  if (relativePath === "packages/ui/package.json") {
+    json.name = options.scope + "/ui";
+  }
+
   if (relativePath === "packages/router/package.json") {
     json.name = options.scope + "/router";
   }
@@ -109,6 +115,7 @@ function rewriteDependencyMap(dependencies, options) {
 
   renameDependency(dependencies, "@litoho/app", `${options.scope}/app`);
   renameDependency(dependencies, "@litoho/core", `${options.scope}/core`);
+  renameDependency(dependencies, "@litoho/ui", `${options.scope}/ui`);
   renameDependency(dependencies, "@litoho/router", `${options.scope}/router`);
   renameDependency(dependencies, "@litoho/server", `${options.scope}/server`);
   renameDependency(dependencies, "litoho", options.cliPackage);
@@ -144,6 +151,7 @@ function rewriteText(source, options) {
   return source
     .replaceAll("@litoho/app", `${options.scope}/app`)
     .replaceAll("@litoho/core", `${options.scope}/core`)
+    .replaceAll("@litoho/ui", `${options.scope}/ui`)
     .replaceAll("@litoho/router", `${options.scope}/router`)
     .replaceAll("@litoho/server", `${options.scope}/server`)
     .replaceAll('process.env.LITOHO_SCOPE?.trim() || "@litoho"', `process.env.LITOHO_SCOPE?.trim() || "${options.scope}"`)

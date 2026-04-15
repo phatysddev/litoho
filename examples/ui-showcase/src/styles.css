@@ -1,0 +1,19 @@
+@import "tailwindcss";
+
+@theme {
+  --color-lito-ink: #07111f;
+  --color-lito-gold: #facc15;
+  --color-lito-mist: #dbe7f5;
+  --font-sans: "Inter", "Segoe UI", sans-serif;
+}
+
+@layer base {
+  html {
+    background: radial-gradient(circle at top, #163051 0%, #08101d 42%, #020611 100%);
+  }
+
+  body {
+    min-height: 100vh;
+    color: #f8fafc;
+  }
+}

@@ -383,10 +383,13 @@ export function createNewApp(rootDir: string) {
             [scopedPackage("app")]: LITOHO_VERSION,
             [scopedPackage("core")]: LITOHO_VERSION,
             [scopedPackage("server")]: LITOHO_VERSION,
+            [scopedPackage("ui")]: LITOHO_VERSION,
             "lit": "^3.2.0"
           },
           devDependencies: {
+            "@tailwindcss/vite": "^4.1.11",
             [LITOHO_CLI_PACKAGE]: LITOHO_VERSION,
+            "tailwindcss": "^4.1.11",
             "tsx": "^4.19.2",
             "typescript": "^5.8.3",
             "vite": "^5.4.19"
@@ -428,11 +431,13 @@ export function createNewApp(rootDir: string) {
   if (!existsSync(viteConfigPath)) {
     writeFileSync(
       viteConfigPath,
-      `import { defineConfig } from "vite";
+      `import tailwindcss from "@tailwindcss/vite";
+import { defineConfig } from "vite";
 
 export default defineConfig({
   appType: "custom",
   plugins: [
+    tailwindcss(),
     {
       name: "litoho-strip-route-directives",
       enforce: "pre",
@@ -489,7 +494,39 @@ export default defineConfig({
   if (!existsSync(mainEntryPath)) {
     writeFileSync(
       mainEntryPath,
-      `import { bootLitoClient } from "${APP_PACKAGE}";\nimport { pageManifest } from "./generated/page-manifest.js";\n\nbootLitoClient({ pageManifest });\n`
+      `import { bootLitoClient } from "${APP_PACKAGE}";
+import "./styles.css";
+import { pageManifest } from "./generated/page-manifest.js";
+
+bootLitoClient({ pageManifest });
+`
+    );
+  }
+
+  const stylesEntryPath = resolve(rootDir, "src/styles.css");
+  if (!existsSync(stylesEntryPath)) {
+    writeFileSync(
+      stylesEntryPath,
+      `@import "tailwindcss";
+
+@theme {
+  --color-lito-ink: #07111f;
+  --color-lito-gold: #facc15;
+  --color-lito-mist: #dbe7f5;
+  --font-sans: "Inter", "Segoe UI", sans-serif;
+}
+
+@layer base {
+  html {
+    background: radial-gradient(circle at top, #163051 0%, #08101d 42%, #020611 100%);
+  }
+
+  body {
+    min-height: 100vh;
+    color: #f8fafc;
+  }
+}
+`
     );
   }
 
@@ -531,7 +568,8 @@ console.log(\`Litoho app is running at http://localhost:\${process.env.PORT ?? 3
   if (!existsSync(indexPagePath)) {
     writeFileSync(
       indexPagePath,
-      `import { html } from "lit";
+      `import "@litoho/ui";
+import { html } from "lit";
 import type { LitoPageModule } from "${APP_PACKAGE}";
 
 const page: LitoPageModule = {
@@ -539,9 +577,55 @@ const page: LitoPageModule = {
     title: "Welcome to Litoho"
   },
   render: () => html\`
-    <main style="max-width: 760px; margin: 0 auto; padding: 32px;">
-      <h1>Welcome to Litoho</h1>
-      <p>Your app scaffold is ready.</p>
+    <main class="mx-auto flex min-h-[calc(100svh-4rem)] w-full max-w-6xl items-center px-6 py-16 sm:px-8">
+      <section class="grid w-full gap-10 lg:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] lg:items-end">
+        <div>
+          <div class="mb-5 inline-flex items-center gap-3 text-xs uppercase tracking-[0.35em] text-lito-gold">
+            <span class="h-px w-10 bg-current"></span>
+            Litoho
+          </div>
+          <h1 class="max-w-4xl text-5xl font-semibold uppercase tracking-[-0.08em] text-white sm:text-7xl lg:text-8xl">
+            Build calm,
+            <span class="block text-lito-gold">fast full-stack UI.</span>
+          </h1>
+          <p class="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
+            Your app scaffold is ready with file-based routing, SSR, Lit, and Tailwind CSS already wired into the client
+            entry.
+          </p>
+          <div class="mt-8 flex flex-wrap gap-3">
+            <a
+              class="inline-flex min-h-12 items-center justify-center rounded-full bg-white px-5 text-sm font-semibold text-lito-ink transition hover:-translate-y-0.5"
+              href="/api/health"
+            >
+              Open health API
+            </a>
+            <a
+              class="inline-flex min-h-12 items-center justify-center rounded-full border border-white/15 px-5 text-sm font-semibold text-white transition hover:-translate-y-0.5 hover:border-lito-gold/50"
+              href="https://tailwindcss.com/docs/installation/using-vite"
+            >
+              Tailwind docs
+            </a>
+          </div>
+        </div>
+
+        <lui-card>
+          <lui-card-header>
+            <lui-badge variant="soft">Starter stack</lui-badge>
+            <lui-card-title>Tailwind + Lit + UI primitives</lui-card-title>
+            <lui-card-description>
+              The default scaffold now ships with <code>@litoho/ui</code> so you can compose real interface pieces right
+              away.
+            </lui-card-description>
+          </lui-card-header>
+          <lui-card-content>
+            <lui-input placeholder="Name your first view"></lui-input>
+          </lui-card-content>
+          <lui-card-footer>
+            <lui-button href="/api/health">Health API</lui-button>
+            <lui-button variant="outline" href="https://tailwindcss.com/docs/installation/using-vite">Tailwind docs</lui-button>
+          </lui-card-footer>
+        </lui-card>
+      </section>
     </main>
   \`
 };
@@ -562,8 +646,17 @@ const layout: LitoLayoutModule<{ appName: string }> = {
   load: () => ({
     appName: "Litoho App"
   }),
-  render: ({ children }) => html\`
-    <div style="min-height: 100vh; background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%);">
+  render: ({ children, data }) => html\`
+    <div class="min-h-screen bg-transparent">
+      <header class="sticky top-0 z-10 border-b border-white/10 bg-slate-950/65 backdrop-blur">
+        <div class="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6 sm:px-8">
+          <a href="/" class="text-sm font-semibold uppercase tracking-[0.28em] text-white">\${data.appName}</a>
+          <nav class="flex items-center gap-4 text-sm text-slate-300">
+            <a class="transition hover:text-white" href="/">Home</a>
+            <a class="transition hover:text-white" href="/api/health">API</a>
+          </nav>
+        </div>
+      </header>
       \${children}
     </div>
   \`

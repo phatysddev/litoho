@@ -37,6 +37,7 @@ packages/
   cli/        litoho CLI
   core/       Reactive primitives and shared frontend runtime helpers
   router/     Route matching and resolution
+  ui/         Lit UI primitives
   server/     SSR server runtime and Node app integration
   testing/    Framework test baseline
 
@@ -52,6 +53,7 @@ examples/
   crud-resource/
   middleware-lab/
   browser-app/
+  ui-showcase/
 
 planning/
   PLANNING.md
@@ -71,6 +73,8 @@ The `examples/` folder is a CLI-first showcase for the current Litoho feature se
   Middleware stacks, auth/security helpers, request inspection, error handling, and protected APIs
 - `examples/browser-app`
   Browser-oriented middleware preset, docs-style nested layouts, and client interactions
+- `examples/ui-showcase`
+  Live showcase for `@litoho/ui`, including buttons, inputs, dialog, tabs, dropdown-menu, toast, and select
 
 See [examples/README.md](/Users/yodsaveesupachoktanasap/Desktop/lito/examples/README.md) for the CLI commands used to scaffold them.
 
@@ -82,6 +86,8 @@ See [examples/README.md](/Users/yodsaveesupachoktanasap/Desktop/lito/examples/RE
   Page/layout module contracts, manifest loading, hydration helpers, and browser boot.
 - `@litoho/router`
   Route matching utilities for static and dynamic segments.
+- `@litoho/ui`
+  Lit-first UI primitives like buttons, badges, cards, inputs, dialog, tabs, dropdown-menu, toast, and select.
 - `@litoho/server`
   Hono-based server runtime, SSR document rendering, typed API helpers, and Node integration.
 - `litoho`
