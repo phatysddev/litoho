@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export class LuiDropdownMenu extends LitElement {
@@ -224,3 +225,13 @@ export class LuiDropdownSeparator extends LitElement {
     return html``;
   }
 }
+
+function registerLuiDropdown() {
+  defineElement("lui-dropdown-menu", LuiDropdownMenu);
+  defineElement("lui-dropdown-trigger", LuiDropdownTrigger);
+  defineElement("lui-dropdown-content", LuiDropdownContent);
+  defineElement("lui-dropdown-item", LuiDropdownItem);
+  defineElement("lui-dropdown-separator", LuiDropdownSeparator);
+}
+
+registerLuiDropdown();

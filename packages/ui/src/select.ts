@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 type LuiSelectChoice = {
@@ -179,3 +180,10 @@ export class LuiSelectOption extends LitElement {
     return html`<slot></slot>`;
   }
 }
+
+function registerLuiSelect() {
+  defineElement("lui-select", LuiSelect);
+  defineElement("lui-select-option", LuiSelectOption);
+}
+
+registerLuiSelect();

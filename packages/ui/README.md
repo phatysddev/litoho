@@ -9,6 +9,8 @@ The package aims for a shadcn-style developer experience:
 - style through attributes, slots, and CSS parts
 - keep the surface area small and composable
 
+It now supports selective imports as well, so you do not have to load the whole set when you only need one primitive.
+
 ## Included components
 
 - `<lui-button>`
@@ -52,3 +54,72 @@ export const page = html`
   </lui-card>
 `;
 ```
+
+## Selective Imports
+
+Import only the component module you need:
+
+```ts
+import "@litoho/ui/badge";
+import { html } from "lit";
+
+export default {
+  render: () => html`<lui-badge variant="outline">Minimal</lui-badge>`
+};
+```
+
+Useful subpaths:
+
+- `@litoho/ui/badge`
+- `@litoho/ui/button`
+- `@litoho/ui/card`
+- `@litoho/ui/dialog`
+- `@litoho/ui/dropdown`
+- `@litoho/ui/input`
+- `@litoho/ui/select`
+- `@litoho/ui/tabs`
+- `@litoho/ui/toast`
+
+## CLI Add Flow
+
+If you are inside a Litoho app, you can register components from the CLI:
+
+```bash
+pnpm exec litoho ui list
+pnpm exec litoho ui diff
+pnpm exec litoho ui info dialog
+pnpm exec litoho ui info form
+pnpm exec litoho ui add badge
+pnpm exec litoho ui add form
+pnpm exec litoho ui add overlay --copy
+pnpm exec litoho ui upgrade
+pnpm exec litoho ui upgrade overlay --force
+pnpm exec litoho ui add badge button card
+```
+
+By default this adds package imports like `@litoho/ui/badge` into your app layout or page entry.
+
+If you want a shadcn-style local copy instead of package imports:
+
+```bash
+pnpm exec litoho ui add dialog tabs --copy
+```
+
+That copies component source files into `app/components/ui` and imports them from there.
+
+To inspect or sync local copied components:
+
+```bash
+pnpm exec litoho ui diff
+pnpm exec litoho ui upgrade
+pnpm exec litoho ui upgrade overlay --force
+```
+
+`ui upgrade` is safe by default and skips files that differ from upstream unless you pass `--force`.
+
+Current presets:
+
+- `form`: `input`, `textarea`, `select`, `button`
+- `overlay`: `dialog`, `dropdown`, `toast`, `button`
+- `content`: `card`, `badge`, `button`
+- `navigation`: `tabs`, `dropdown`, `button`

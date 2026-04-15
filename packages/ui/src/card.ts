@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export class LuiCard extends LitElement {
@@ -115,3 +116,14 @@ export class LuiCardFooter extends LitElement {
     return html`<slot></slot>`;
   }
 }
+
+function registerLuiCard() {
+  defineElement("lui-card", LuiCard);
+  defineElement("lui-card-header", LuiCardHeader);
+  defineElement("lui-card-title", LuiCardTitle);
+  defineElement("lui-card-description", LuiCardDescription);
+  defineElement("lui-card-content", LuiCardContent);
+  defineElement("lui-card-footer", LuiCardFooter);
+}
+
+registerLuiCard();

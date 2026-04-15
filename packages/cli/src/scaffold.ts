@@ -1,5 +1,6 @@
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
+import { UI_COMPONENT_REGISTRY, type UiComponentRegistryKey } from "./ui-registry.js";
 
 const LITOHO_VERSION = "^0.0.10";
 const LITOHO_SCOPE = process.env.LITOHO_SCOPE?.trim() || "@litoho";
@@ -12,6 +13,32 @@ function scopedPackage(name: string) {
 
 const APP_PACKAGE = scopedPackage("app");
 const SERVER_PACKAGE = scopedPackage("server");
+const UI_PACKAGE = scopedPackage("ui");
+const UI_SOURCE_DIRECTORY = new URL("../../ui/src/", import.meta.url);
+
+const UI_COMPONENT_MODULES = Object.fromEntries(
+  Object.entries(UI_COMPONENT_REGISTRY).map(([name, metadata]) => [name, metadata.module])
+) as Record<UiComponentRegistryKey, string>;
+
+export type LuiComponentName = UiComponentRegistryKey;
+export type AddUiComponentResult = {
+  component: string;
+  importPath: string;
+  targetFile: string;
+  copiedFiles: string[];
+};
+export type UiLocalFileStatus = "up_to_date" | "different" | "missing" | "extra";
+export type UiLocalFileReport = {
+  file: string;
+  sourceFile: string | null;
+  status: UiLocalFileStatus;
+};
+export type UpgradeLocalUiComponentsResult = {
+  created: string[];
+  updated: string[];
+  skipped: string[];
+  unchanged: string[];
+};
 
 export type PageTemplate = "default" | "client-counter" | "server-data" | "api-inspector" | "not-found-demo";
 
@@ -383,6 +410,7 @@ export function createNewApp(rootDir: string) {
             [scopedPackage("app")]: LITOHO_VERSION,
             [scopedPackage("core")]: LITOHO_VERSION,
             [scopedPackage("server")]: LITOHO_VERSION,
+            [UI_PACKAGE]: LITOHO_VERSION,
             "lit": "^3.2.0"
           },
           devDependencies: {
@@ -858,8 +886,281 @@ export default route;
   return createdFiles;
 }
 
+export function addUiComponentsToProject(
+  rootDir: string,
+  componentNames: string[],
+  options: {
+    file?: string;
+    copy?: boolean;
+    copyDir?: string;
+  } = {}
+) {
+  const targetFile = resolve(rootDir, options.file ?? pickDefaultUiTarget(rootDir));
+  const normalizedComponents = [...new Set(componentNames.map(normalizeUiComponentName))];
+
+  if (normalizedComponents.length === 0) {
+    throw new Error("At least one UI component is required.");
+  }
+
+  const copiedFiles = options.copy
+    ? ensureLocalUiComponents(rootDir, normalizedComponents, options.copyDir ?? "app/components/ui")
+    : [];
+
+  if (!options.copy) {
+    ensureUiDependency(rootDir);
+  }
+
+  const importPaths = normalizedComponents.map((componentName) =>
+    options.copy
+      ? toLocalUiImportPath(
+          targetFile,
+          resolve(rootDir, options.copyDir ?? "app/components/ui", `${UI_COMPONENT_MODULES[componentName]}.ts`)
+        )
+      : `${UI_PACKAGE}/${UI_COMPONENT_MODULES[componentName]}`
+  );
+
+  ensureImportsInFile(targetFile, importPaths);
+
+  return normalizedComponents.map((component) => ({
+    component,
+    importPath: importPaths[normalizedComponents.indexOf(component)],
+    targetFile,
+    copiedFiles
+  }));
+}
+
+export function diffLocalUiComponents(
+  rootDir: string,
+  componentNames: string[] = [],
+  options: {
+    copyDir?: string;
+  } = {}
+) {
+  const copyDir = options.copyDir ?? "app/components/ui";
+  const targetFiles = resolveUiLocalFileSet(rootDir, componentNames, copyDir);
+  const reports: UiLocalFileReport[] = targetFiles.map(({ localFile, sourceFile }) => ({
+    file: localFile,
+    sourceFile: sourceFile.pathname,
+    status: compareUiLocalFile(localFile, sourceFile)
+  }));
+
+  const extraFiles = findExtraUiLocalFiles(rootDir, copyDir, new Set(targetFiles.map((entry) => entry.localFile)));
+  for (const extraFile of extraFiles) {
+    reports.push({
+      file: extraFile,
+      sourceFile: null,
+      status: "extra"
+    });
+  }
+
+  return reports;
+}
+
+export function upgradeLocalUiComponents(
+  rootDir: string,
+  componentNames: string[] = [],
+  options: {
+    copyDir?: string;
+    force?: boolean;
+  } = {}
+): UpgradeLocalUiComponentsResult {
+  const copyDir = options.copyDir ?? "app/components/ui";
+  const targetFiles = resolveUiLocalFileSet(rootDir, componentNames, copyDir);
+  const result: UpgradeLocalUiComponentsResult = {
+    created: [],
+    updated: [],
+    skipped: [],
+    unchanged: []
+  };
+
+  for (const { localFile, sourceFile } of targetFiles) {
+    const sourceContent = readFileSync(sourceFile, "utf8");
+
+    if (!existsSync(localFile)) {
+      ensureParentDirectory(localFile);
+      writeFileSync(localFile, sourceContent);
+      result.created.push(localFile);
+      continue;
+    }
+
+    const currentContent = readFileSync(localFile, "utf8");
+    if (currentContent === sourceContent) {
+      result.unchanged.push(localFile);
+      continue;
+    }
+
+    if (!options.force) {
+      result.skipped.push(localFile);
+      continue;
+    }
+
+    writeFileSync(localFile, sourceContent);
+    result.updated.push(localFile);
+  }
+
+  return result;
+}
+
 function ensureParentDirectory(filePath: string) {
   mkdirSync(dirname(filePath), { recursive: true });
+}
+
+function pickDefaultUiTarget(rootDir: string) {
+  const rootLayoutPath = resolve(rootDir, "app/pages/_layout.ts");
+  if (existsSync(rootLayoutPath)) {
+    return "app/pages/_layout.ts";
+  }
+
+  const indexPagePath = resolve(rootDir, "app/pages/_index.ts");
+  if (existsSync(indexPagePath)) {
+    return "app/pages/_index.ts";
+  }
+
+  return "app/pages/_layout.ts";
+}
+
+function ensureUiDependency(rootDir: string) {
+  const packageJsonPath = resolve(rootDir, "package.json");
+  if (!existsSync(packageJsonPath)) {
+    return;
+  }
+
+  const packageJson = JSON.parse(readFileSync(packageJsonPath, "utf8")) as {
+    dependencies?: Record<string, string>;
+  };
+
+  packageJson.dependencies ??= {};
+
+  if (!packageJson.dependencies[UI_PACKAGE]) {
+    packageJson.dependencies[UI_PACKAGE] = LITOHO_VERSION;
+    writeFileSync(packageJsonPath, `${JSON.stringify(packageJson, null, 2)}\n`);
+  }
+}
+
+function normalizeUiComponentName(componentName: string) {
+  const normalizedComponentName = componentName.trim().toLowerCase() as LuiComponentName;
+
+  if (!UI_COMPONENT_MODULES[normalizedComponentName]) {
+    throw new Error(
+      `Unknown UI component: ${componentName}. Supported components: ${Object.keys(UI_COMPONENT_MODULES).join(", ")}`
+    );
+  }
+
+  return normalizedComponentName;
+}
+
+function ensureImportsInFile(targetFile: string, importPaths: string[]) {
+  const uniqueImportStatements = [...new Set(importPaths)].map((importPath) => `import "${importPath}";`);
+
+  if (!existsSync(targetFile)) {
+    ensureParentDirectory(targetFile);
+    writeFileSync(
+      targetFile,
+      `${uniqueImportStatements.join("\n")}
+import type { LitoLayoutModule } from "${APP_PACKAGE}";
+
+const layout: LitoLayoutModule = {
+  render: ({ children }) => children
+};
+
+export default layout;
+`
+    );
+    return;
+  }
+
+  const currentSource = readFileSync(targetFile, "utf8");
+  const missingStatements = uniqueImportStatements.filter((statement) => !currentSource.includes(statement));
+
+  if (missingStatements.length === 0) {
+    return;
+  }
+
+  writeFileSync(targetFile, `${missingStatements.join("\n")}\n${currentSource}`);
+}
+
+function ensureLocalUiComponents(rootDir: string, componentNames: LuiComponentName[], copyDir: string) {
+  const copiedFiles = new Set<string>();
+  const fileSet = resolveUiLocalFileSet(rootDir, componentNames, copyDir);
+
+  for (const { localFile, sourceFile } of fileSet) {
+    const targetPath = localFile;
+
+    ensureParentDirectory(targetPath);
+
+    if (!existsSync(targetPath)) {
+      writeFileSync(targetPath, readFileSync(sourceFile, "utf8"));
+    }
+
+    copiedFiles.add(targetPath);
+  }
+
+  return [...copiedFiles];
+}
+
+function toLocalUiImportPath(fromFilePath: string, toFilePath: string) {
+  const relativePath = relative(dirname(fromFilePath), toFilePath).replace(/\\/g, "/").replace(/\.ts$/, ".js");
+  return relativePath.startsWith(".") ? relativePath : `./${relativePath}`;
+}
+
+function resolveUiLocalFileSet(rootDir: string, componentNames: string[], copyDir: string) {
+  const targetDirectory = resolve(rootDir, copyDir);
+  const sourceModules = new Set<string>();
+  const normalizedComponents =
+    componentNames.length === 0 ? inferLocalUiComponents(rootDir, copyDir) : [...new Set(componentNames.map(normalizeUiComponentName))];
+
+  for (const componentName of normalizedComponents) {
+    sourceModules.add(UI_COMPONENT_MODULES[componentName]);
+  }
+
+  if (sourceModules.size > 0) {
+    sourceModules.add("styles");
+    sourceModules.add("define-element");
+  }
+
+  return [...sourceModules].map((sourceModule) => ({
+    module: sourceModule,
+    localFile: resolve(targetDirectory, `${sourceModule}.ts`),
+    sourceFile: new URL(`${sourceModule}.ts`, UI_SOURCE_DIRECTORY)
+  }));
+}
+
+function inferLocalUiComponents(rootDir: string, copyDir: string) {
+  const targetDirectory = resolve(rootDir, copyDir);
+  const inferred = new Set<LuiComponentName>();
+
+  for (const [componentName, moduleName] of Object.entries(UI_COMPONENT_MODULES) as [LuiComponentName, string][]) {
+    if (existsSync(resolve(targetDirectory, `${moduleName}.ts`))) {
+      inferred.add(componentName);
+    }
+  }
+
+  return [...inferred];
+}
+
+function compareUiLocalFile(localFile: string, sourceFile: URL): UiLocalFileStatus {
+  if (!existsSync(localFile)) {
+    return "missing";
+  }
+
+  return readFileSync(localFile, "utf8") === readFileSync(sourceFile, "utf8") ? "up_to_date" : "different";
+}
+
+function findExtraUiLocalFiles(rootDir: string, copyDir: string, knownFiles: Set<string>) {
+  const targetDirectory = resolve(rootDir, copyDir);
+  if (!existsSync(targetDirectory)) {
+    return [];
+  }
+
+  const expectedFileNames = new Set([
+    ...Object.values(UI_COMPONENT_MODULES).map((moduleName) => `${moduleName}.ts`),
+    "styles.ts",
+    "define-element.ts"
+  ]);
+
+  return [...expectedFileNames]
+    .map((fileName) => resolve(targetDirectory, fileName))
+    .filter((filePath) => existsSync(filePath) && !knownFiles.has(filePath));
 }
 
 function normalizePagePath(routePath: string) {

@@ -4,7 +4,9 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { formatDoctorReport, hasDoctorErrors, runLitoDoctor } from "./doctor.js";
 import { generateRouteManifests } from "./generate-route-manifests.js";
+import { expandUiSelection, UI_COMPONENT_REGISTRY, UI_PRESET_REGISTRY } from "./ui-registry.js";
 import {
+  addUiComponentsToProject,
   createApiMiddlewareFile,
   createApiFile,
   createCrudResource,
@@ -14,6 +16,8 @@ import {
   createNewApp,
   createNotFoundPageFile,
   createPageFile,
+  diffLocalUiComponents,
+  upgradeLocalUiComponents,
   type ApiQueryField,
   type MiddlewareStackTemplate,
   type PageTemplate,
@@ -49,6 +53,13 @@ async function main() {
     case "generate":
     case "g":
       await handleGenerateCommand(restArgs);
+      return;
+    case "ui":
+      await handleUiCommand(restArgs);
+      return;
+    case "add":
+    case "a":
+      await handleAddCommand(restArgs);
       return;
     case "dev":
       generateRouteManifests(projectRoot);
@@ -161,6 +172,219 @@ async function handleGenerateCommand(commandArgs: string[]) {
   }
 }
 
+async function handleUiCommand(commandArgs: string[]) {
+  const [subcommand, ...rest] = commandArgs;
+
+  if (subcommand === "add") {
+    await handleAddUiCommand(rest);
+    return;
+  }
+
+  if (subcommand === "list") {
+    printUiRegistry();
+    return;
+  }
+
+  if (subcommand === "diff") {
+    await handleDiffUiCommand(rest);
+    return;
+  }
+
+  if (subcommand === "info") {
+    printUiInfo(rest[0]);
+    return;
+  }
+
+  if (subcommand === "upgrade") {
+    await handleUpgradeUiCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown ui command: ${subcommand ?? "(missing)"}`);
+}
+
+async function handleAddCommand(commandArgs: string[]) {
+  const [namespace, ...rest] = commandArgs;
+
+  if (namespace === "ui") {
+    const [next, ...remaining] = rest;
+
+    if (next === "list") {
+      printUiRegistry();
+      return;
+    }
+
+    if (next === "diff") {
+      await handleDiffUiCommand(remaining);
+      return;
+    }
+
+    if (next === "info") {
+      printUiInfo(remaining[0]);
+      return;
+    }
+
+    if (next === "upgrade") {
+      await handleUpgradeUiCommand(remaining);
+      return;
+    }
+
+    await handleAddUiCommand(rest);
+    return;
+  }
+
+  throw new Error(`Unknown add target: ${namespace ?? "(missing)"}`);
+}
+
+async function handleAddUiCommand(commandArgs: string[]) {
+  const file = readFlagValue(commandArgs, "--file");
+  const copyDir = readFlagValue(commandArgs, "--dir");
+  const isCopy = commandArgs.includes("--copy");
+  let filteredArgs = stripFlag(commandArgs, "--file");
+  filteredArgs = stripFlag(filteredArgs, "--dir");
+  filteredArgs = stripBooleanFlag(filteredArgs, "--copy");
+  const componentNames = filteredArgs.filter((value) => !value.startsWith("--"));
+
+  if (componentNames.length === 0) {
+    throw new Error("Usage: litoho ui add <component...> [--copy] [--dir <path>] [--file <path>] [--root <dir>]");
+  }
+
+  const selection = expandUiSelection(componentNames);
+  const results = addUiComponentsToProject(projectRoot, selection.components, {
+    file,
+    copy: isCopy,
+    copyDir
+  });
+
+  const announcedImports = new Set<string>();
+
+  for (const result of results) {
+    if (announcedImports.has(result.importPath)) {
+      continue;
+    }
+
+    announcedImports.add(result.importPath);
+    console.log(`Added ${result.importPath} to ${result.targetFile}`);
+  }
+
+  if (isCopy && results[0]?.copiedFiles.length) {
+    console.log(`Copied local UI files into ${copyDir ?? "app/components/ui"}`);
+  }
+
+  if (selection.presets.length > 0) {
+    console.log(`Expanded presets: ${selection.presets.join(", ")}`);
+  }
+}
+
+async function handleDiffUiCommand(commandArgs: string[]) {
+  const copyDir = readFlagValue(commandArgs, "--dir");
+  let filteredArgs = stripFlag(commandArgs, "--dir");
+  const items = filteredArgs.filter((value) => !value.startsWith("--"));
+  const selection = items.length > 0 ? expandUiSelection(items) : { components: [], presets: [], requestedComponents: [] };
+  const reports = diffLocalUiComponents(projectRoot, selection.components, {
+    copyDir
+  });
+
+  if (reports.length === 0) {
+    console.log(`No local copied UI files found in ${copyDir ?? "app/components/ui"}`);
+    return;
+  }
+
+  for (const report of reports) {
+    console.log(`[${report.status}] ${report.file}`);
+  }
+
+  if (selection.presets.length > 0) {
+    console.log(`Expanded presets: ${selection.presets.join(", ")}`);
+  }
+}
+
+async function handleUpgradeUiCommand(commandArgs: string[]) {
+  const copyDir = readFlagValue(commandArgs, "--dir");
+  const force = commandArgs.includes("--force");
+  let filteredArgs = stripFlag(commandArgs, "--dir");
+  filteredArgs = stripBooleanFlag(filteredArgs, "--force");
+  const items = filteredArgs.filter((value) => !value.startsWith("--"));
+  const selection = items.length > 0 ? expandUiSelection(items) : { components: [], presets: [], requestedComponents: [] };
+  const result = upgradeLocalUiComponents(projectRoot, selection.components, {
+    copyDir,
+    force
+  });
+
+  for (const filePath of result.created) {
+    console.log(`[created] ${filePath}`);
+  }
+
+  for (const filePath of result.updated) {
+    console.log(`[updated] ${filePath}`);
+  }
+
+  for (const filePath of result.unchanged) {
+    console.log(`[unchanged] ${filePath}`);
+  }
+
+  for (const filePath of result.skipped) {
+    console.log(`[skipped] ${filePath} (use --force to overwrite local changes)`);
+  }
+
+  if (
+    result.created.length === 0 &&
+    result.updated.length === 0 &&
+    result.unchanged.length === 0 &&
+    result.skipped.length === 0
+  ) {
+    console.log(`No local copied UI files found in ${copyDir ?? "app/components/ui"}`);
+  }
+
+  if (selection.presets.length > 0) {
+    console.log(`Expanded presets: ${selection.presets.join(", ")}`);
+  }
+}
+
+function printUiRegistry() {
+  console.log(`UI Components`);
+
+  for (const [name, metadata] of Object.entries(UI_COMPONENT_REGISTRY)) {
+    console.log(`- ${name}: ${metadata.description}`);
+  }
+
+  console.log(`\nUI Presets`);
+
+  for (const [name, preset] of Object.entries(UI_PRESET_REGISTRY)) {
+    console.log(`- ${name}: ${preset.components.join(", ")}${preset.description ? ` — ${preset.description}` : ""}`);
+  }
+}
+
+function printUiInfo(name?: string) {
+  if (!name) {
+    throw new Error("Usage: litoho ui info <component|preset> [--root <dir>]");
+  }
+
+  const normalized = name.trim().toLowerCase();
+
+  if (normalized in UI_COMPONENT_REGISTRY) {
+    const metadata = UI_COMPONENT_REGISTRY[normalized as keyof typeof UI_COMPONENT_REGISTRY];
+    console.log(`${normalized}`);
+    console.log(`title: ${metadata.title}`);
+    console.log(`module: @litoho/ui/${metadata.module}`);
+    console.log(`description: ${metadata.description}`);
+    console.log(`tags: ${metadata.tags.join(", ")}`);
+    console.log(`snippet:\n${metadata.snippet}`);
+    return;
+  }
+
+  if (normalized in UI_PRESET_REGISTRY) {
+    const preset = UI_PRESET_REGISTRY[normalized as keyof typeof UI_PRESET_REGISTRY];
+    console.log(`${normalized}`);
+    console.log(`title: ${preset.title}`);
+    console.log(`description: ${preset.description}`);
+    console.log(`components: ${preset.components.join(", ")}`);
+    return;
+  }
+
+  throw new Error(`Unknown UI component or preset: ${name}`);
+}
+
 function runLocalCommand(cwd: string, binary: string, commandArgs: string[], env: Record<string, string> = {}) {
   const result = spawnSync("pnpm", ["exec", binary, ...commandArgs], {
     cwd,
@@ -185,6 +409,13 @@ Usage:
   litoho build [--root <dir>]
   litoho start [--root <dir>]
   litoho doctor [--root <dir>]
+  litoho ui add <component...> [--copy] [--dir <path>] [--file <path>] [--root <dir>]
+  litoho ui diff [component|preset...] [--dir <path>] [--root <dir>]
+  litoho ui list
+  litoho ui info <component|preset>
+  litoho ui upgrade [component|preset...] [--dir <path>] [--force] [--root <dir>]
+  litoho add ui <component...> [--copy] [--dir <path>] [--file <path>] [--root <dir>]
+  litoho a ui <component...> [--copy] [--dir <path>] [--file <path>] [--root <dir>]
   litoho generate routes [--root <dir>]
   litoho g routes [--root <dir>]
   litoho generate page <path> [--params <name[,name2]>] [--ssr] [--csr] [--throw-demo] [--template <client-counter|server-data|api-inspector|not-found-demo>] [--root <dir>]
@@ -208,6 +439,18 @@ Usage:
 
 Examples:
   litoho new blog-app
+  litoho ui list
+  litoho ui diff
+  litoho ui info dialog
+  litoho ui info form
+  litoho ui add badge
+  litoho ui add form
+  litoho ui add overlay --copy
+  litoho ui upgrade
+  litoho ui upgrade overlay --force
+  litoho ui add badge button card
+  litoho ui add dialog tabs --copy
+  litoho add ui dialog --file app/pages/admin/_layout.ts
   litoho generate page docs/getting-started
   litoho -g page docs/getting-started
   litoho g p docs/getting-started

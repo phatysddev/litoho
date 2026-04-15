@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export type LuiButtonVariant = "default" | "secondary" | "outline" | "ghost" | "danger";
@@ -152,3 +153,9 @@ export class LuiButton extends LitElement {
     `;
   }
 }
+
+function registerLuiButton() {
+  defineElement("lui-button", LuiButton);
+}
+
+registerLuiButton();

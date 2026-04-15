@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export class LuiDialog extends LitElement {
@@ -220,3 +221,15 @@ export class LuiDialogFooter extends LitElement {
     return html`<slot></slot>`;
   }
 }
+
+function registerLuiDialog() {
+  defineElement("lui-dialog", LuiDialog);
+  defineElement("lui-dialog-trigger", LuiDialogTrigger);
+  defineElement("lui-dialog-close", LuiDialogClose);
+  defineElement("lui-dialog-content", LuiDialogContent);
+  defineElement("lui-dialog-title", LuiDialogTitle);
+  defineElement("lui-dialog-description", LuiDialogDescription);
+  defineElement("lui-dialog-footer", LuiDialogFooter);
+}
+
+registerLuiDialog();

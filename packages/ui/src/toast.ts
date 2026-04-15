@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export type LuiToastVariant = "default" | "success" | "danger";
@@ -144,3 +145,9 @@ export class LuiToastRegion extends LitElement {
     `;
   }
 }
+
+function registerLuiToast() {
+  defineElement("lui-toast-region", LuiToastRegion);
+}
+
+registerLuiToast();

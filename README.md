@@ -88,6 +88,7 @@ See [examples/README.md](/Users/yodsaveesupachoktanasap/Desktop/lito/examples/RE
   Route matching utilities for static and dynamic segments.
 - `@litoho/ui`
   Lit-first UI primitives like buttons, badges, cards, inputs, dialog, tabs, dropdown-menu, toast, and select.
+  Supports selective imports like `@litoho/ui/badge`, preset-based CLI registration like `litoho ui add form`, discovery via `litoho ui list` / `litoho ui info dialog`, local vendor copies with `litoho ui add overlay --copy`, and maintenance flows via `litoho ui diff` / `litoho ui upgrade`.
 - `@litoho/server`
   Hono-based server runtime, SSR document rendering, typed API helpers, and Node integration.
 - `litoho`

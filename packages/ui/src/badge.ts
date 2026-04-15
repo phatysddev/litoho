@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export type LuiBadgeVariant = "default" | "outline" | "soft";
@@ -59,3 +60,9 @@ export class LuiBadge extends LitElement {
     return html`<span class=${this.variant} part="badge"><slot></slot></span>`;
   }
 }
+
+function registerLuiBadge() {
+  defineElement("lui-badge", LuiBadge);
+}
+
+registerLuiBadge();

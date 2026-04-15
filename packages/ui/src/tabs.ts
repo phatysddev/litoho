@@ -1,4 +1,5 @@
 import { LitElement, css, html } from "lit";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 type LuiTabsChangeEvent = CustomEvent<{ value: string }>;
@@ -225,3 +226,12 @@ export class LuiTabsContent extends LitElement {
     return html`<slot></slot>`;
   }
 }
+
+function registerLuiTabs() {
+  defineElement("lui-tabs", LuiTabs);
+  defineElement("lui-tabs-list", LuiTabsList);
+  defineElement("lui-tabs-trigger", LuiTabsTrigger);
+  defineElement("lui-tabs-content", LuiTabsContent);
+}
+
+registerLuiTabs();

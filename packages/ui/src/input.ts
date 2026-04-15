@@ -1,5 +1,6 @@
 import { LitElement, css, html } from "lit";
 import { createRef, ref } from "lit/directives/ref.js";
+import { defineElement } from "./define-element.js";
 import { luiBaseStyles } from "./styles.js";
 
 export class LuiInput extends LitElement {
@@ -199,3 +200,10 @@ export class LuiTextarea extends LitElement {
     this.dispatchEvent(new Event("change", { bubbles: true, composed: true }));
   }
 }
+
+function registerLuiInput() {
+  defineElement("lui-input", LuiInput);
+  defineElement("lui-textarea", LuiTextarea);
+}
+
+registerLuiInput();
