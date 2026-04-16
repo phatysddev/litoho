@@ -117,6 +117,14 @@ pnpm exec litoho ui upgrade overlay --force
 
 `ui upgrade` is safe by default and skips files that differ from upstream unless you pass `--force`.
 
+`ui diff` now understands metadata headers added to copied files and can report:
+
+- `up_to_date`: local file matches upstream
+- `outdated`: local file still matches the old copied source, but upstream changed
+- `modified`: local file was edited by you while upstream stayed the same
+- `diverged`: both local file and upstream changed
+- `legacy`: local file exists without Litoho copy metadata
+
 Current presets:
 
 - `form`: `input`, `textarea`, `select`, `button`

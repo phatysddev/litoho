@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { UI_COMPONENT_REGISTRY, type UiComponentRegistryKey } from "./ui-registry.js";
@@ -15,6 +16,7 @@ const APP_PACKAGE = scopedPackage("app");
 const SERVER_PACKAGE = scopedPackage("server");
 const UI_PACKAGE = scopedPackage("ui");
 const UI_SOURCE_DIRECTORY = new URL("../../ui/src/", import.meta.url);
+const UI_COPY_HEADER_MARKER = "@litoho/ui-copy";
 
 const UI_COMPONENT_MODULES = Object.fromEntries(
   Object.entries(UI_COMPONENT_REGISTRY).map(([name, metadata]) => [name, metadata.module])
@@ -27,7 +29,7 @@ export type AddUiComponentResult = {
   targetFile: string;
   copiedFiles: string[];
 };
-export type UiLocalFileStatus = "up_to_date" | "different" | "missing" | "extra";
+export type UiLocalFileStatus = "up_to_date" | "outdated" | "modified" | "diverged" | "legacy" | "missing" | "extra";
 export type UiLocalFileReport = {
   file: string;
   sourceFile: string | null;
@@ -975,26 +977,29 @@ export function upgradeLocalUiComponents(
 
   for (const { localFile, sourceFile } of targetFiles) {
     const sourceContent = readFileSync(sourceFile, "utf8");
+    const managedSourceContent = createManagedUiCopyContent(sourceFile.pathname, sourceContent);
 
     if (!existsSync(localFile)) {
       ensureParentDirectory(localFile);
-      writeFileSync(localFile, sourceContent);
+      writeFileSync(localFile, managedSourceContent);
       result.created.push(localFile);
       continue;
     }
 
     const currentContent = readFileSync(localFile, "utf8");
-    if (currentContent === sourceContent) {
+    const currentStatus = compareUiLocalFile(localFile, sourceFile);
+
+    if (currentStatus === "up_to_date") {
       result.unchanged.push(localFile);
       continue;
     }
 
-    if (!options.force) {
+    if (!options.force && currentStatus !== "outdated") {
       result.skipped.push(localFile);
       continue;
     }
 
-    writeFileSync(localFile, sourceContent);
+    writeFileSync(localFile, managedSourceContent);
     result.updated.push(localFile);
   }
 
@@ -1089,7 +1094,7 @@ function ensureLocalUiComponents(rootDir: string, componentNames: LuiComponentNa
     ensureParentDirectory(targetPath);
 
     if (!existsSync(targetPath)) {
-      writeFileSync(targetPath, readFileSync(sourceFile, "utf8"));
+      writeFileSync(targetPath, createManagedUiCopyContent(sourceFile.pathname, readFileSync(sourceFile, "utf8")));
     }
 
     copiedFiles.add(targetPath);
@@ -1143,7 +1148,30 @@ function compareUiLocalFile(localFile: string, sourceFile: URL): UiLocalFileStat
     return "missing";
   }
 
-  return readFileSync(localFile, "utf8") === readFileSync(sourceFile, "utf8") ? "up_to_date" : "different";
+  const sourceContent = readFileSync(sourceFile, "utf8");
+  const localContent = readFileSync(localFile, "utf8");
+  const parsedCopy = parseManagedUiCopy(localContent);
+
+  if (!parsedCopy) {
+    return localContent === normalizeTrailingNewline(sourceContent) ? "legacy" : "diverged";
+  }
+
+  const currentSourceHash = hashContent(sourceContent);
+  const localBodyHash = hashContent(parsedCopy.body);
+
+  if (localBodyHash === currentSourceHash) {
+    return "up_to_date";
+  }
+
+  if (localBodyHash === parsedCopy.sourceHash && parsedCopy.sourceHash !== currentSourceHash) {
+    return "outdated";
+  }
+
+  if (parsedCopy.sourceHash === currentSourceHash) {
+    return "modified";
+  }
+
+  return "diverged";
 }
 
 function findExtraUiLocalFiles(rootDir: string, copyDir: string, knownFiles: Set<string>) {
@@ -1161,6 +1189,55 @@ function findExtraUiLocalFiles(rootDir: string, copyDir: string, knownFiles: Set
   return [...expectedFileNames]
     .map((fileName) => resolve(targetDirectory, fileName))
     .filter((filePath) => existsSync(filePath) && !knownFiles.has(filePath));
+}
+
+function createManagedUiCopyContent(sourceFilePath: string, sourceContent: string) {
+  const normalizedSourceContent = normalizeTrailingNewline(sourceContent);
+  const sourceHash = hashContent(normalizedSourceContent);
+
+  return [
+    `// ${UI_COPY_HEADER_MARKER}`,
+    `// source: ${sourceFilePath}`,
+    `// source-hash: ${sourceHash}`,
+    `// litoho-version: ${LITOHO_VERSION}`,
+    "",
+    normalizedSourceContent
+  ].join("\n");
+}
+
+function parseManagedUiCopy(content: string) {
+  if (!content.startsWith(`// ${UI_COPY_HEADER_MARKER}`)) {
+    return null;
+  }
+
+  const lines = content.split("\n");
+  const separatorIndex = lines.findIndex((line, index) => index > 0 && line.trim() === "");
+
+  if (separatorIndex < 0) {
+    return null;
+  }
+
+  const metadataLines = lines.slice(0, separatorIndex);
+  const sourceHashLine = metadataLines.find((line) => line.startsWith("// source-hash: "));
+  const sourceLine = metadataLines.find((line) => line.startsWith("// source: "));
+
+  if (!sourceHashLine || !sourceLine) {
+    return null;
+  }
+
+  return {
+    source: sourceLine.slice("// source: ".length).trim(),
+    sourceHash: sourceHashLine.slice("// source-hash: ".length).trim(),
+    body: normalizeTrailingNewline(lines.slice(separatorIndex + 1).join("\n"))
+  };
+}
+
+function hashContent(content: string) {
+  return createHash("sha256").update(normalizeTrailingNewline(content)).digest("hex");
+}
+
+function normalizeTrailingNewline(content: string) {
+  return content.endsWith("\n") ? content : `${content}\n`;
 }
 
 function normalizePagePath(routePath: string) {

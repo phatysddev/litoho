@@ -1,7 +1,15 @@
-import "@litoho/ui";
+import "@litoho/ui/badge";
+import "@litoho/ui/button";
+import "@litoho/ui/card";
+import "@litoho/ui/dialog";
+import "@litoho/ui/dropdown";
+import "@litoho/ui/input";
+import "@litoho/ui/select";
+import "@litoho/ui/tabs";
+import "@litoho/ui/toast";
 import { html } from "lit";
 import type { LitoPageModule } from "@litoho/app";
-import { showToast } from "@litoho/ui";
+import { showToast } from "@litoho/ui/toast";
 
 const openToast = (variant: "default" | "success" | "danger", title: string, description: string) => () => {
   showToast({
@@ -28,8 +36,8 @@ const page: LitoPageModule = {
             <span class="block text-lito-gold">with a shadcn-style feel.</span>
           </h1>
           <p class="mt-6 max-w-2xl text-base leading-8 text-slate-300 sm:text-lg">
-            This page shows every component currently shipped in <code class="rounded bg-white/10 px-2 py-1 text-slate-100">@litoho/ui</code>,
-            including the new interactive set: dialog, tabs, dropdown, toast, and select.
+            This page tracks the current Litoho UI workflow: selective imports, preset-based CLI install, local copy mode,
+            and metadata-aware upgrades for copied components.
           </p>
         </div>
 
@@ -38,14 +46,53 @@ const page: LitoPageModule = {
             <lui-badge variant="soft">Preview</lui-badge>
             <lui-card-title>What you get</lui-card-title>
             <lui-card-description>
-              Ready-to-use Lit web components with a calm default aesthetic and minimal setup friction.
+              Ready-to-use Lit web components with a calm default aesthetic, plus a CLI flow that is much closer to a
+              real framework DX now.
             </lui-card-description>
           </lui-card-header>
           <lui-card-content>
             <div class="grid gap-3 text-sm text-slate-300">
               <div>Buttons, badges, cards, inputs, textareas</div>
               <div>Dialog, tabs, dropdown-menu, toast, select</div>
-              <div>Import once, use anywhere in Litoho pages</div>
+              <div>Import by subpath, add by preset, or copy locally into your app</div>
+            </div>
+          </lui-card-content>
+        </lui-card>
+      </section>
+
+      <section class="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <lui-card>
+          <lui-card-header>
+            <lui-badge variant="outline">Current DX</lui-badge>
+            <lui-card-title>Selective imports first</lui-card-title>
+            <lui-card-description>
+              The showcase itself now imports only the modules it uses instead of loading the whole package root.
+            </lui-card-description>
+          </lui-card-header>
+          <lui-card-content>
+            <div class="rounded-3xl border border-white/10 bg-slate-950/40 p-5 text-sm leading-7 text-slate-300">
+              <div class="mb-2 text-xs uppercase tracking-[0.24em] text-lito-gold">Example</div>
+              <pre class="overflow-auto rounded-2xl bg-black/30 p-4 text-slate-200"><code>import "@litoho/ui/button";
+import "@litoho/ui/dialog";
+import { showToast } from "@litoho/ui/toast";</code></pre>
+            </div>
+          </lui-card-content>
+        </lui-card>
+
+        <lui-card>
+          <lui-card-header>
+            <lui-badge variant="outline">CLI Workflow</lui-badge>
+            <lui-card-title>Presets and local copy mode</lui-card-title>
+            <lui-card-description>
+              Litoho can add package imports directly or vendor component source into your app for a shadcn-like editing flow.
+            </lui-card-description>
+          </lui-card-header>
+          <lui-card-content>
+            <div class="rounded-3xl border border-white/10 bg-slate-950/40 p-5 text-sm leading-7 text-slate-300">
+              <pre class="overflow-auto rounded-2xl bg-black/30 p-4 text-slate-200"><code>pnpm exec litoho ui add form
+pnpm exec litoho ui add overlay --copy
+pnpm exec litoho ui diff
+pnpm exec litoho ui upgrade overlay --force</code></pre>
             </div>
           </lui-card-content>
         </lui-card>
@@ -160,8 +207,9 @@ const page: LitoPageModule = {
 
               <lui-tabs-content value="usage">
                 <div class="rounded-3xl border border-white/10 bg-slate-950/30 p-5 text-sm leading-7 text-slate-300">
-                  Import <code class="rounded bg-white/10 px-2 py-1 text-slate-100">@litoho/ui</code> once in a page or layout,
-                  then use tags like <code class="rounded bg-white/10 px-2 py-1 text-slate-100">&lt;lui-button&gt;</code>.
+                  Import only the modules you need, or use presets like
+                  <code class="rounded bg-white/10 px-2 py-1 text-slate-100">litoho ui add form</code> to scaffold a
+                  small component set quickly.
                 </div>
               </lui-tabs-content>
             </lui-tabs>
@@ -172,7 +220,10 @@ const page: LitoPageModule = {
           <lui-card-header>
             <lui-badge variant="outline">Dialog + Toast</lui-badge>
             <lui-card-title>Feedback layer</lui-card-title>
-            <lui-card-description>Overlay interactions and ephemeral notifications work together nicely.</lui-card-description>
+            <lui-card-description>
+              Overlay interactions and ephemeral notifications work together nicely, and copied files can now be diffed
+              and upgraded safely.
+            </lui-card-description>
           </lui-card-header>
           <lui-card-content>
             <div class="flex flex-wrap gap-3">

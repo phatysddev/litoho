@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { existsSync, watch } from "node:fs";
 import { resolve } from "node:path";
 import { formatDoctorReport, hasDoctorErrors, runLitoDoctor } from "./doctor.js";
 import { generateRouteManifests } from "./generate-route-manifests.js";
@@ -62,8 +63,7 @@ async function main() {
       await handleAddCommand(restArgs);
       return;
     case "dev":
-      generateRouteManifests(projectRoot);
-      runLocalCommand(projectRoot, "tsx", ["server.ts"]);
+      await runDevCommand(projectRoot);
       return;
     case "build":
       generateRouteManifests(projectRoot);
@@ -398,6 +398,100 @@ function runLocalCommand(cwd: string, binary: string, commandArgs: string[], env
   if (result.status !== 0) {
     process.exit(result.status ?? 1);
   }
+}
+
+async function runDevCommand(cwd: string) {
+  logManifestGeneration("initial");
+  generateRouteManifests(cwd);
+
+  const watchers = createManifestWatchers(cwd);
+  const child = spawn("pnpm", ["exec", "tsx", "watch", "server.ts"], {
+    cwd,
+    env: process.env,
+    stdio: "inherit"
+  });
+
+  const cleanup = () => {
+    for (const stopWatching of watchers) {
+      stopWatching();
+    }
+  };
+
+  child.on("exit", (code, signal) => {
+    cleanup();
+
+    if (signal) {
+      process.kill(process.pid, signal);
+      return;
+    }
+
+    process.exit(code ?? 0);
+  });
+
+  for (const signal of ["SIGINT", "SIGTERM"] as const) {
+    process.on(signal, () => {
+      cleanup();
+      child.kill(signal);
+    });
+  }
+}
+
+function createManifestWatchers(cwd: string) {
+  const watchTargets = ["app/pages", "app/api", "src/generated", "server.ts"]
+    .map((relativePath) => resolve(cwd, relativePath))
+    .filter((path) => existsSync(path));
+  let suppressGeneratedUntil = 0;
+
+  return watchTargets.map((target) => {
+    let timeout: NodeJS.Timeout | undefined;
+
+    const watcher = watch(target, { recursive: true }, () => {
+      if (target.endsWith("/src/generated") || target.endsWith("\\src\\generated")) {
+        if (Date.now() < suppressGeneratedUntil) {
+          return;
+        }
+      }
+
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+
+      timeout = setTimeout(() => {
+        try {
+          logManifestGeneration("update", target);
+          suppressGeneratedUntil = Date.now() + 250;
+          generateRouteManifests(cwd);
+        } catch (error) {
+          console.error("[litoho dev] Failed to regenerate route manifests.");
+          console.error(error);
+        }
+      }, 80);
+    });
+
+    return () => {
+      if (timeout) {
+        clearTimeout(timeout);
+      }
+
+      watcher.close();
+    };
+  });
+}
+
+function logManifestGeneration(kind: "initial" | "update", target?: string) {
+  const timestamp = new Date().toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  });
+
+  if (kind === "initial") {
+    console.log(`[litoho dev ${timestamp}] generated route manifests`);
+    return;
+  }
+
+  console.log(`[litoho dev ${timestamp}] regenerated route manifests from ${target}`);
 }
 
 function printHelp() {
