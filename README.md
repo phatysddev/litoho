@@ -2,7 +2,7 @@
 
 Litoho is an experimental full-stack framework built around Lit, file-based routing, SSR, and a small package-first architecture.
 
-This README reflects the `0.0.11` milestone: the first usable monorepo snapshot with a working CLI, page routing, server rendering, client-only pages, typed API routes, playground apps, and CLI-first examples.
+This README reflects the `0.0.12` milestone: the first usable monorepo snapshot with a working CLI, page routing, server rendering, client-only pages, typed API routes, playground apps, and CLI-first examples.
 
 ## What Litoho Is
 
@@ -14,7 +14,7 @@ Litoho is aiming for a simple mental model:
 - use one Node server for SSR pages, APIs, and Vite in development
 - keep the framework split into focused packages instead of one large runtime
 
-## 0.0.11 Features
+## 0.0.12 Features
 
 - Lit-based full-stack app model
 - File-based page routing from `app/pages`
@@ -208,7 +208,7 @@ The full release guide is in [docs/PUBLISHING.md](/Users/yodsaveesupachoktanasap
 
 ## CLI
 
-Main commands available in `0.0.11`:
+Main commands available in `0.0.12`:
 
 ```bash
 litoho new <name>
@@ -283,7 +283,7 @@ export default defineApiRoute({
 
 ## Current Status
 
-`0.0.11` is still an early framework snapshot. The core developer flow works, but the project is still evolving and some conventions may tighten as Litoho moves toward a more stable release.
+`0.0.12` is still an early framework snapshot. The core developer flow works, but the project is still evolving and some conventions may tighten as Litoho moves toward a more stable release.
 
 Things that are already solid enough to explore:
 
