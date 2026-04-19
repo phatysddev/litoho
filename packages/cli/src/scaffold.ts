@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import { UI_COMPONENT_REGISTRY, type UiComponentRegistryKey } from "./ui-registry.js";
 
-const LITOHO_VERSION = "^0.0.10";
+const LITOHO_VERSION = "^0.0.11";
 const LITOHO_SCOPE = process.env.LITOHO_SCOPE?.trim() || "@litoho";
 const LITOHO_CLI_PACKAGE = process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho";
 const LITOHO_CLI_BIN = process.env.LITOHO_CLI_BIN?.trim() || "litoho";
