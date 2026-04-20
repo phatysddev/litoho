@@ -15,6 +15,10 @@ const shouldBuild = args.includes("--build") || args.includes("--start");
 const shouldStart = args.includes("--start");
 const packageManager = readFlagValue(args, "--package-manager") ?? "npm";
 const port = Number(readFlagValue(args, "--port") ?? "4310");
+const publishedRetryCount = Number(readFlagValue(args, "--published-retries") ?? process.env.LITOHO_PUBLISHED_RETRIES ?? "12");
+const publishedRetryDelayMs = Number(
+  readFlagValue(args, "--published-retry-delay-ms") ?? process.env.LITOHO_PUBLISHED_RETRY_DELAY_MS ?? "10000"
+);
 const reportPath = resolveReportPath(rootDir, readFlagValue(args, "--report"));
 const tempRoot = mkdtempSync(join(tmpdir(), "litoho-smoke-"));
 const appName = readFlagValue(args, "--app-name") ?? "demo-app";
@@ -29,6 +33,8 @@ const smokeReport = {
   install: shouldInstall,
   build: shouldBuild,
   start: shouldStart,
+  publishedRetryCount,
+  publishedRetryDelayMs,
   generatedFilesVerified: false,
   versionSyncVerified: false,
   routeManifestVerified: false,
@@ -85,7 +91,7 @@ function scaffoldApp() {
   if (published) {
     const publishedPackageSpec = cliVersion ? `${cliPackageName}@${cliVersion}` : cliPackageName;
     console.log(`[Litoho smoke] scaffolding with published CLI: npx ${publishedPackageSpec} new ${appName}`);
-    run("npx", ["-y", publishedPackageSpec, "new", appName], tempRoot);
+    runPublishedCliScaffold(publishedPackageSpec);
     return;
   }
 
@@ -242,6 +248,36 @@ function run(command, commandArgs, cwd) {
   }
 }
 
+function runPublishedCliScaffold(publishedPackageSpec) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= publishedRetryCount; attempt += 1) {
+    const result = spawnSync("npx", ["-y", publishedPackageSpec, "new", appName], {
+      cwd: tempRoot,
+      stdio: "inherit",
+      env: process.env
+    });
+
+    if (result.status === 0) {
+      return;
+    }
+
+    lastError = new Error(`Command failed: npx -y ${publishedPackageSpec} new ${appName}`);
+
+    if (attempt === publishedRetryCount) {
+      break;
+    }
+
+    console.log(
+      `[Litoho smoke] published CLI not ready yet, retrying in ${Math.ceil(publishedRetryDelayMs / 1000)}s ` +
+        `(attempt ${attempt}/${publishedRetryCount})`
+    );
+    sleepSync(publishedRetryDelayMs);
+  }
+
+  throw lastError;
+}
+
 function installArgs(manager) {
   if (manager === "pnpm") {
     return ["install"];
@@ -275,6 +311,10 @@ function sleep(ms) {
   return new Promise((resolvePromise) => {
     setTimeout(resolvePromise, ms);
   });
+}
+
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function onceExit(child) {

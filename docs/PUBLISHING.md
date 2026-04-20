@@ -151,6 +151,13 @@ If you also want a post-publish verification pass against the published package:
 pnpm run release:publish -- --verify-published
 ```
 
+Published verification now retries automatically for a short window because npm package propagation can lag just after publish. You can tune it with:
+
+```bash
+LITOHO_PUBLISHED_RETRIES=12
+LITOHO_PUBLISHED_RETRY_DELAY_MS=10000
+```
+
 ## GitHub Actions Example
 
 An example workflow is included at `.github/workflows/release-report-check.yml`.
