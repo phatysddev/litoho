@@ -140,6 +140,8 @@ if (!dryRun && verifyPublished) {
       scope,
       "--cli-package",
       cliPackageName,
+      "--cli-version",
+      releaseVersion,
       "--report",
       reportPath
     ],

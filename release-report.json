@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-20T12:56:07.492Z",
+  "generatedAt": "2026-04-20T12:57:19.973Z",
   "steps": {
     "preflight": {
       "status": "passed",
@@ -132,22 +132,23 @@
       "updatedAt": "2026-04-20T12:56:05.563Z"
     },
     "smoke": {
-      "status": "failed",
-      "mode": "published",
+      "status": "passed",
+      "mode": "local",
       "scope": "@litoho",
       "cliPackageName": "litoho",
       "packageManager": "npm",
       "appName": "demo-app",
-      "install": true,
-      "build": true,
-      "start": true,
-      "generatedFilesVerified": false,
-      "versionSyncVerified": false,
-      "routeManifestVerified": false,
+      "install": false,
+      "build": false,
+      "start": false,
+      "generatedFilesVerified": true,
+      "versionSyncVerified": true,
+      "routeManifestVerified": true,
       "startProbeVerified": false,
-      "expectedVersion": "^0.0.12",
-      "updatedAt": "2026-04-20T12:56:07.486Z",
-      "error": "Generated app is missing required files:\n- public/robots.txt\n- public/logo.svg"
+      "expectedVersion": "^0.1.0",
+      "updatedAt": "2026-04-20T12:57:19.973Z",
+      "error": "Generated app is missing required files:\n- public/robots.txt\n- public/logo.svg",
+      "cliVersion": "0.1.0"
     },
     "verify": {
       "status": "failed",

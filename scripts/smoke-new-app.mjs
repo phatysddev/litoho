@@ -8,6 +8,7 @@ const rootDir = process.cwd();
 const args = process.argv.slice(2);
 const scope = readFlagValue(args, "--scope") ?? process.env.LITOHO_SCOPE?.trim() ?? "@litoho";
 const cliPackageName = readFlagValue(args, "--cli-package") ?? process.env.LITOHO_CLI_PACKAGE?.trim() ?? "litoho";
+const cliVersion = readFlagValue(args, "--cli-version") ?? process.env.LITOHO_CLI_VERSION?.trim();
 const published = args.includes("--published");
 const shouldInstall = args.includes("--install");
 const shouldBuild = args.includes("--build") || args.includes("--start");
@@ -22,6 +23,7 @@ const smokeReport = {
   mode: published ? "published" : "local",
   scope,
   cliPackageName,
+  cliVersion,
   packageManager,
   appName,
   install: shouldInstall,
@@ -37,6 +39,9 @@ async function main() {
   console.log(`[Litoho smoke] temp root: ${tempRoot}`);
   console.log(`[Litoho smoke] scope: ${scope}`);
   console.log(`[Litoho smoke] cli package: ${cliPackageName}`);
+  if (cliVersion) {
+    console.log(`[Litoho smoke] cli version: ${cliVersion}`);
+  }
   scaffoldApp();
   verifyScaffoldedFiles();
   verifyVersionSync();
@@ -78,8 +83,9 @@ try {
 
 function scaffoldApp() {
   if (published) {
-    console.log(`[Litoho smoke] scaffolding with published CLI: npx ${cliPackageName} new ${appName}`);
-    run("npx", ["-y", cliPackageName, "new", appName], tempRoot);
+    const publishedPackageSpec = cliVersion ? `${cliPackageName}@${cliVersion}` : cliPackageName;
+    console.log(`[Litoho smoke] scaffolding with published CLI: npx ${publishedPackageSpec} new ${appName}`);
+    run("npx", ["-y", publishedPackageSpec, "new", appName], tempRoot);
     return;
   }
 
@@ -118,7 +124,7 @@ function verifyScaffoldedFiles() {
 function verifyVersionSync() {
   const rootPackageJson = JSON.parse(readFileSync(resolve(rootDir, "package.json"), "utf8"));
   const generatedPackageJson = JSON.parse(readFileSync(resolve(appRoot, "package.json"), "utf8"));
-  const expectedVersion = `^${rootPackageJson.version}`;
+  const expectedVersion = `^${cliVersion ?? rootPackageJson.version}`;
 
   const dependencyEntries = [
     ["dependencies", `${scope}/app`],

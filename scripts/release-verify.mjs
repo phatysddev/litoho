@@ -5,7 +5,7 @@ const rootDir = process.cwd();
 const args = process.argv.slice(2);
 const skipTest = args.includes("--skip-test");
 const published = args.includes("--published");
-const forwardedSmokeArgs = args.filter((arg) => arg !== "--skip-test");
+const forwardedSmokeArgs = stripFlag(args.filter((arg) => arg !== "--skip-test"), "--report");
 const reportPath = resolveReportPath(rootDir, readFlagValue(args, "--report"));
 const verifyReport = {
   published,
@@ -70,4 +70,13 @@ function run(command, commandArgs, cwd, stepName) {
 function readFlagValue(inputArgs, flagName) {
   const index = inputArgs.indexOf(flagName);
   return index >= 0 ? inputArgs[index + 1] : undefined;
+}
+
+function stripFlag(inputArgs, flagName) {
+  const index = inputArgs.indexOf(flagName);
+  if (index < 0) {
+    return inputArgs;
+  }
+
+  return [...inputArgs.slice(0, index), ...inputArgs.slice(index + 2)];
 }
