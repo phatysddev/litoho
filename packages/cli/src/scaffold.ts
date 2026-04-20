@@ -823,6 +823,34 @@ export default layout;
     );
   }
 
+  const publicDirectory = resolve(rootDir, "public");
+  if (!existsSync(publicDirectory)) {
+    mkdirSync(publicDirectory, { recursive: true });
+  }
+
+  const robotsPath = resolve(rootDir, "public/robots.txt");
+  if (!existsSync(robotsPath)) {
+    writeFileSync(
+      robotsPath,
+      `User-agent: *
+Allow: /
+`
+    );
+  }
+
+  const logoPath = resolve(rootDir, "public/logo.svg");
+  if (!existsSync(logoPath)) {
+    writeFileSync(
+      logoPath,
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 160 160" fill="none">
+  <rect width="160" height="160" rx="36" fill="#07111f"/>
+  <path d="M44 40h20v60h52v20H44V40z" fill="#facc15"/>
+  <path d="M86 40h30v20H86V40z" fill="#dbe7f5"/>
+</svg>
+`
+    );
+  }
+
   const gitkeepPath = resolve(rootDir, "src/generated/.gitkeep");
   if (!existsSync(gitkeepPath)) {
     writeFileSync(gitkeepPath, "");

@@ -1,5 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   badRequest,
   createLitoServer,
@@ -505,4 +508,49 @@ test("withSecurityHeaders, withRequestId, and withCacheControl decorate downstre
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("content-security-policy"), "default-src 'self'");
   assert.equal(response.headers.get("cache-control"), "private, max-age=60");
+});
+
+test("createLitoServer serves public assets before page routing", async () => {
+  const tempRoot = mkdtempSync(join(tmpdir(), "litoho-public-assets-"));
+
+  try {
+    const publicRoot = resolve(tempRoot, "public");
+    mkdirSync(resolve(publicRoot, "images"), { recursive: true });
+    writeFileSync(resolve(publicRoot, "logo.txt"), "brand-mark");
+    writeFileSync(resolve(publicRoot, "robots.txt"), "User-agent: *\nAllow: /\n");
+    writeFileSync(resolve(publicRoot, "images/hero.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>");
+
+    const app = createLitoServer({
+      appName: "Litoho Test",
+      publicRoot,
+      pages: [
+        {
+          id: "home",
+          path: "/",
+          render: () => "home"
+        },
+        {
+          id: "logo-page",
+          path: "/logo.txt",
+          render: () => "this page route should never win"
+        }
+      ]
+    });
+
+    const logoResponse = await app.fetch(new Request("http://litoho.test/logo.txt"));
+    const robotsResponse = await app.fetch(new Request("http://litoho.test/robots.txt"));
+    const imageResponse = await app.fetch(new Request("http://litoho.test/images/hero.svg"));
+    const pageResponse = await app.fetch(new Request("http://litoho.test/"));
+
+    assert.equal(logoResponse.status, 200);
+    assert.equal(await logoResponse.text(), "brand-mark");
+    assert.equal(robotsResponse.status, 200);
+    assert.match(await robotsResponse.text(), /User-agent: \*/);
+    assert.equal(imageResponse.status, 200);
+    assert.match(imageResponse.headers.get("content-type") ?? "", /image\/svg\+xml/);
+    assert.equal(pageResponse.status, 200);
+    assert.match(await pageResponse.text(), /home/);
+  } finally {
+    rmSync(tempRoot, { recursive: true, force: true });
+  }
 });

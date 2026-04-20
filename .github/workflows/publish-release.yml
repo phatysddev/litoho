@@ -1,0 +1,92 @@
+name: Publish Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: "Framework npm scope"
+        required: false
+        default: "@litoho"
+        type: string
+      cli_package:
+        description: "CLI package name"
+        required: false
+        default: "litoho"
+        type: string
+      cli_bin:
+        description: "CLI binary name"
+        required: false
+        default: "litoho"
+        type: string
+      bump:
+        description: "Version bump target"
+        required: false
+        default: "patch"
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      verify_published:
+        description: "Run published verification after npm publish"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    env:
+      LITOHO_SCOPE: ${{ inputs.scope }}
+      LITOHO_CLI_PACKAGE: ${{ inputs.cli_package }}
+      LITOHO_CLI_BIN: ${{ inputs.cli_bin }}
+      LITOHO_RELEASE_REPORT: artifacts/release-report.json
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile=false
+
+      - name: Publish packages
+        run: |
+          VERIFY_PUBLISHED_FLAG=""
+          if [ "${{ inputs.verify_published }}" = "true" ]; then
+            VERIFY_PUBLISHED_FLAG="--verify-published"
+          fi
+
+          pnpm run release:publish -- --bump "${{ inputs.bump }}" ${VERIFY_PUBLISHED_FLAG}
+
+      - name: Validate release report
+        if: always()
+        run: pnpm run release:report:check -- --report artifacts/release-report.json
+
+      - name: Write job summary
+        if: always()
+        run: pnpm run release:report:summary -- --report artifacts/release-report.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-report
+          path: artifacts/release-report.json

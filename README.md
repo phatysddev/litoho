@@ -25,6 +25,7 @@ Litoho is aiming for a simple mental model:
 - Client-only page mode through top-level `"use client"`
 - Server-intent page mode through top-level `"use server"`
 - Typed query parsing for API routes
+- `public/` asset serving for files like `logo.png`, `robots.txt`, and `sitemap.xml`
 - Route manifest generation
 - CLI scaffolding for pages, APIs, layouts, and resources
 - A lightweight reactive core with `signal()`, `memo()`, `watch()`, `batch()`, and `store()`
@@ -189,9 +190,12 @@ Generated apps include:
 
 - `app/pages`
 - `app/api`
+- `public`
 - `src/main.ts`
 - `server.ts`
 - `vite.config.ts`
+
+Files inside `public/` are served directly by the Node app, so URLs like `/logo.png`, `/robots.txt`, and `/sitemap.xml` work without custom routing.
 
 ## Publishing
 
@@ -205,6 +209,7 @@ pnpm run release:publish
 ```
 
 The full release guide is in [docs/PUBLISHING.md](/Users/yodsaveesupachoktanasap/Desktop/lito/docs/PUBLISHING.md).
+The MVP release gate is tracked in [docs/MVP.md](/Users/yodsaveesupachoktanasap/Desktop/lito/docs/MVP.md).
 
 ## CLI
 

@@ -1,0 +1,136 @@
+{
+  "generatedAt": "2026-04-20T12:41:47.532Z",
+  "steps": {
+    "preflight": {
+      "status": "passed",
+      "hasErrors": false,
+      "hasWarnings": false,
+      "scope": "@litoho",
+      "cliPackageName": "litoho",
+      "cliBin": "litoho",
+      "packages": [
+        {
+          "dir": "packages/router",
+          "currentName": "@litoho/router",
+          "publishName": "@litoho/router",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          }
+        },
+        {
+          "dir": "packages/core",
+          "currentName": "@litoho/core",
+          "publishName": "@litoho/core",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          }
+        },
+        {
+          "dir": "packages/ui",
+          "currentName": "@litoho/ui",
+          "publishName": "@litoho/ui",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          }
+        },
+        {
+          "dir": "packages/server",
+          "currentName": "@litoho/server",
+          "publishName": "@litoho/server",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          }
+        },
+        {
+          "dir": "packages/app",
+          "currentName": "@litoho/app",
+          "publishName": "@litoho/app",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          }
+        },
+        {
+          "dir": "packages/cli",
+          "currentName": "litoho",
+          "publishName": "litoho",
+          "version": "0.0.12",
+          "distFiles": {
+            "dist/index.js": true,
+            "dist/index.d.ts": true
+          },
+          "binOk": true
+        }
+      ],
+      "checks": {
+        "cliScaffoldVersion": {
+          "packageVersion": "0.0.12",
+          "sourceVersion": "^0.0.12",
+          "distVersion": "^0.0.12",
+          "expected": "^0.0.12"
+        },
+        "publicAssetSupport": [
+          {
+            "label": "server publicRoot option",
+            "ok": true
+          },
+          {
+            "label": "server static asset matcher",
+            "ok": true
+          },
+          {
+            "label": "node app publicRoot wiring",
+            "ok": true
+          },
+          {
+            "label": "new app public directory",
+            "ok": true
+          },
+          {
+            "label": "new app public robots.txt",
+            "ok": true
+          },
+          {
+            "label": "dist scaffold public robots.txt",
+            "ok": true
+          }
+        ],
+        "mvpGateDocs": [
+          {
+            "label": "docs/MVP.md",
+            "ok": true
+          },
+          {
+            "label": "README mentions public assets",
+            "ok": true
+          },
+          {
+            "label": "PUBLISHING mentions MVP gate",
+            "ok": true
+          }
+        ],
+        "smokeScript": [
+          {
+            "label": "scripts/smoke-new-app.mjs",
+            "ok": true
+          },
+          {
+            "label": "package.json release:smoke:new",
+            "ok": true
+          }
+        ]
+      },
+      "updatedAt": "2026-04-20T12:41:47.531Z"
+    }
+  },
+  "status": "passed"
+}

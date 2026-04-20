@@ -3,9 +3,12 @@ import { execFileSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { applyPackageIdentity } from "./package-identity.mjs";
+import { resolveReportPath, updateReleaseStep } from "./release-report.mjs";
 
 const rootDir = process.cwd();
 const dryRun = process.argv.includes("--dry-run");
+const skipVerify = process.argv.includes("--skip-verify") || process.env.LITOHO_SKIP_VERIFY === "true";
+const verifyPublished = process.argv.includes("--verify-published");
 const bumpTarget = readFlagValue(process.argv.slice(2), "--bump") ?? process.env.LITOHO_BUMP?.trim() ?? "patch";
 const autoBump = !dryRun && process.env.LITOHO_AUTO_BUMP !== "false";
 const allowDirty = process.env.LITOHO_ALLOW_DIRTY === "true";
@@ -15,8 +18,35 @@ const scope = process.env.LITOHO_SCOPE?.trim() || "@litoho";
 const cliPackageName = process.env.LITOHO_CLI_PACKAGE?.trim() || "litoho";
 const cliBin = process.env.LITOHO_CLI_BIN?.trim() || "litoho";
 const cliAccess = cliPackageName.startsWith("@") ? "public" : undefined;
+const reportPath = resolveReportPath(rootDir, readFlagValue(process.argv.slice(2), "--report"));
+const publishReport = {
+  dryRun,
+  skipVerify,
+  verifyPublished,
+  bumpTarget,
+  scope,
+  cliPackageName,
+  cliBin,
+  packages: []
+};
 
 ensureCleanWorktree();
+
+if (!dryRun && !skipVerify) {
+  console.log("[Litoho publish] Running release verification before publish");
+  exec("node", ["scripts/release-verify.mjs", "--report", reportPath], rootDir);
+} else if (!dryRun && skipVerify) {
+  console.warn(`
+[Litoho publish warning]
+Release verification was skipped before publish.
+
+Recommended:
+- pnpm run release:verify
+
+Override flags detected:
+- --skip-verify or LITOHO_SKIP_VERIFY=true
+`);
+}
 
 if (autoBump) {
   console.log(`[Litoho publish] Auto bumping version with "${bumpTarget}"`);
@@ -76,15 +106,52 @@ for (const pkg of packages) {
 
   try {
     exec("npm", args, packageDir);
+    publishReport.packages.push({
+      name: pkg.label,
+      dir: pkg.dir,
+      status: "published",
+      dryRun
+    });
   } catch (error) {
+    publishReport.packages.push({
+      name: pkg.label,
+      dir: pkg.dir,
+      status: "failed",
+      dryRun,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    finalizeReport("failed");
     printPublishHelp(pkg.label);
     throw error;
   }
 }
 
+if (!dryRun && verifyPublished) {
+  console.log("[Litoho publish] Running published verification after publish");
+  exec(
+    "node",
+    [
+      "scripts/release-verify.mjs",
+      "--published",
+      "--install",
+      "--build",
+      "--start",
+      "--scope",
+      scope,
+      "--cli-package",
+      cliPackageName,
+      "--report",
+      reportPath
+    ],
+    rootDir
+  );
+}
+
 if (autoGit) {
   createReleaseCommitAndTag(releaseVersion);
 }
+
+finalizeReport("passed");
 
 function exec(command, args, cwd) {
   execFileSync(command, args, {
@@ -220,10 +287,22 @@ Examples:
 - LITOHO_SCOPE=@your-npm-scope pnpm run release:publish
 - LITOHO_SCOPE=@your-npm-scope LITOHO_CLI_PACKAGE=@your-npm-scope/litoho pnpm run release:publish
 - LITOHO_SCOPE=@your-npm-scope LITOHO_CLI_PACKAGE=@your-npm-scope/litoho LITOHO_CLI_BIN=litoho pnpm run release:publish
+- pnpm run release:publish -- --skip-verify
+- pnpm run release:publish -- --verify-published
 
 Important:
 - \`npx litoho new demo-app\` only works if you can publish the unscoped package name \`litoho\`
 - if \`litoho\` is unavailable, use a scoped CLI package and run:
   npx ${cliPackageName} new demo-app
 `);
+}
+
+function finalizeReport(status) {
+  updateReleaseStep(reportPath, "publish", {
+    status,
+    releaseVersion,
+    autoBump,
+    autoGit,
+    ...publishReport
+  });
 }

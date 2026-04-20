@@ -55,6 +55,139 @@ You can also preview identity rewriting:
 pnpm run identity:preview
 ```
 
+## Pre-Release Checklist
+
+Run this sequence before the final publish:
+
+1. Make sure the git worktree is clean.
+2. Run `pnpm build`.
+3. Run `pnpm typecheck`.
+4. Run `pnpm test`.
+5. Run `pnpm run release:preflight`.
+6. Run `pnpm run release:pack`.
+7. Smoke test a fresh scaffolded app from the current CLI version.
+8. Confirm `public/` assets such as `logo.png`, `robots.txt`, and `sitemap.xml` are reachable in the generated app.
+
+If you want a single human-readable gate for MVP, use [docs/MVP.md](/Users/yodsaveesupachoktanasap/Desktop/lito/docs/MVP.md).
+
+You can also run the scaffold smoke test directly:
+
+```bash
+pnpm run release:smoke:new
+```
+
+If you want one command that runs preflight, scaffold smoke test, and the full test suite:
+
+```bash
+pnpm run release:verify
+```
+
+If you want the same flow against the published package:
+
+```bash
+pnpm run release:verify:published
+```
+
+All release scripts also write a machine-readable `release-report.json` in the repo root by default. You can override the output path with:
+
+```bash
+LITOHO_RELEASE_REPORT=artifacts/release-report.json pnpm run release:verify
+```
+
+Top-level report status is summarized automatically:
+
+- `passed`
+- `warning`
+- `failed`
+
+You can validate the report in CI or locally with:
+
+```bash
+pnpm run release:report:check
+pnpm run release:report:check -- --report artifacts/release-report.json
+```
+
+And you can render a markdown summary from the same report with:
+
+```bash
+pnpm run release:report:summary
+pnpm run release:report:summary -- --report artifacts/release-report.json --out artifacts/summary.md
+```
+
+For a fuller end-to-end check after publish:
+
+```bash
+pnpm run release:smoke:new -- --published --install --build --start
+```
+
+You can also target a custom published scope or CLI package explicitly:
+
+```bash
+pnpm run release:smoke:new -- --published --scope @litoho --cli-package litoho --install --build --start
+pnpm run release:smoke:new -- --published --scope @your-scope --cli-package @your-scope/litoho --install --build --start
+```
+
+And the same published mode works through the verify command:
+
+```bash
+pnpm run release:verify -- --published --scope @your-scope --cli-package @your-scope/litoho --install --build --start
+```
+
+`release:publish` now runs `release:verify` automatically before publishing. If you intentionally want to bypass that gate for a one-off release, use:
+
+```bash
+pnpm run release:publish -- --skip-verify
+```
+
+Or:
+
+```bash
+LITOHO_SKIP_VERIFY=true pnpm run release:publish
+```
+
+If you also want a post-publish verification pass against the published package:
+
+```bash
+pnpm run release:publish -- --verify-published
+```
+
+## GitHub Actions Example
+
+An example workflow is included at `.github/workflows/release-report-check.yml`.
+
+It does four things:
+
+1. installs dependencies
+2. runs `pnpm run release:verify -- --report artifacts/release-report.json`
+3. runs `pnpm run release:report:check -- --report artifacts/release-report.json`
+4. uploads the report as a workflow artifact
+
+If any step in `release-report.json` ends in `failed`, the job exits non-zero automatically. By default, `warning` also fails the job. If you want warnings to pass, use:
+
+```bash
+pnpm run release:report:check -- --allow-warnings
+```
+
+That workflow also writes a human-readable job summary into the GitHub Actions summary panel using `pnpm run release:report:summary`.
+
+## Publish Workflow Example
+
+A second example workflow is included at `.github/workflows/publish-release.yml`.
+
+It is designed for manual release publishing through `workflow_dispatch` and supports:
+
+- custom npm scope
+- custom CLI package name
+- custom CLI bin name
+- patch/minor/major bump selection
+- optional `--verify-published` pass after publish
+
+To use it in a real repository, add:
+
+- `NPM_TOKEN` as a GitHub Actions secret
+
+The workflow writes and uploads `artifacts/release-report.json`, and also posts a readable markdown summary to the Actions job summary.
+
 ## Dry Run
 
 Use a dry run first:
