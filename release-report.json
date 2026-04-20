@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-20T12:41:47.532Z",
+  "generatedAt": "2026-04-20T12:49:28.201Z",
   "steps": {
     "preflight": {
       "status": "passed",
@@ -129,8 +129,62 @@
           }
         ]
       },
-      "updatedAt": "2026-04-20T12:41:47.531Z"
+      "updatedAt": "2026-04-20T12:49:25.749Z"
+    },
+    "smoke": {
+      "status": "passed",
+      "mode": "local",
+      "scope": "@litoho",
+      "cliPackageName": "litoho",
+      "packageManager": "npm",
+      "appName": "demo-app",
+      "install": false,
+      "build": false,
+      "start": false,
+      "generatedFilesVerified": true,
+      "versionSyncVerified": true,
+      "routeManifestVerified": true,
+      "startProbeVerified": false,
+      "expectedVersion": "^0.0.12",
+      "updatedAt": "2026-04-20T12:49:25.875Z"
+    },
+    "verify": {
+      "status": "failed",
+      "published": false,
+      "skipTest": false,
+      "steps": [
+        {
+          "name": "preflight",
+          "status": "passed",
+          "command": "node",
+          "args": [
+            "scripts/release-preflight.mjs",
+            "--report",
+            "/Users/yodsaveesupachoktanasap/Desktop/lito/release-report.json"
+          ]
+        },
+        {
+          "name": "smoke",
+          "status": "passed",
+          "command": "node",
+          "args": [
+            "scripts/smoke-new-app.mjs",
+            "--report",
+            "/Users/yodsaveesupachoktanasap/Desktop/lito/release-report.json"
+          ]
+        },
+        {
+          "name": "test",
+          "status": "failed",
+          "command": "pnpm",
+          "args": [
+            "test"
+          ]
+        }
+      ],
+      "error": "Command failed: pnpm test",
+      "updatedAt": "2026-04-20T12:49:28.200Z"
     }
   },
-  "status": "passed"
+  "status": "failed"
 }

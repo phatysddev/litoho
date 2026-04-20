@@ -744,9 +744,10 @@ export function composeMiddlewares(...middlewares: Array<LitoMiddleware | false 
         return next();
       }
 
-      return await middleware(context, async () => {
+      const result = await middleware(context, async () => {
         return dispatch(nextIndex + 1);
       });
+      return result ?? undefined;
     };
 
     return dispatch(0);
@@ -1334,7 +1335,7 @@ async function runMiddlewares(input: {
       return undefined;
     }
 
-    return middleware(
+    const result = await middleware(
       {
         ...input.context,
         kind: input.kind,
@@ -1344,6 +1345,7 @@ async function runMiddlewares(input: {
         return dispatch(index + 1);
       }
     );
+    return result ?? undefined;
   };
 
   return dispatch(0);
