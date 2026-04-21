@@ -2,8 +2,25 @@ export { createDevClientAssets, createManifestClientAssets } from "./client-asse
 export { startLitoNodeApp } from "./node-app.js";
 export { createLitoServer } from "./server.js";
 export { defineApiRoute } from "./server.js";
-export { readQuery } from "./server.js";
-export { badRequest, forbidden, html, json, methodNotAllowed, notFound, redirect, unauthorized } from "./server.js";
+export { createCspHeader, readJsonBody, readQuery } from "./server.js";
+export {
+  appendCookie,
+  badRequest,
+  createCookieHeader,
+  createCsrfCookie,
+  createCsrfToken,
+  createSecureCookieHeader,
+  deleteCookie,
+  forbidden,
+  html,
+  json,
+  methodNotAllowed,
+  notFound,
+  redirect,
+  setCookie,
+  setSecureCookie,
+  unauthorized
+} from "./server.js";
 export { composeMiddlewares } from "./server.js";
 export {
   createAuthGuardMiddleware,
@@ -12,8 +29,12 @@ export {
   createLoggerMiddleware,
   createRequestMetaMiddleware,
   createTimingMiddleware,
+  withBodyLimit,
   withCacheControl,
   withCors,
+  withCsrf,
+  withCsp,
+  withJsonBody,
   withRequestId,
   withSecurityHeaders,
   withRateLimit
@@ -35,8 +56,17 @@ export type {
   LitoMiddlewareNext,
   LitoMiddlewareContext,
   LitoAuthGuardMiddlewareOptions,
+  LitoBodyLimitOptions,
   LitoCacheControlOptions,
   LitoCorsOptions,
+  LitoCookieOptions,
+  LitoCspDirectiveValue,
+  LitoCspDirectives,
+  LitoCspOptions,
+  LitoCsrfOptions,
+  LitoCsrfTokenSource,
+  LitoJsonBodyErrorReason,
+  LitoJsonBodyOptions,
   LitoNotFoundPage,
   LitoPageRoute,
   LitoRateLimitOptions,
@@ -48,12 +78,15 @@ export type {
   LitoRequestLocals,
   LitoRequestTiming,
   LitoSecurityHeadersOptions,
+  LitoSecureCookieOptions,
   LitoParsedQuery,
   LitoQuerySchema,
   LitoQueryValueType,
   LitoServerEnvironment,
   LitoServerOptions,
   LitoTimingMiddlewareOptions,
+  LitoTrustedProxyConfig,
+  LitoTrustedProxyInfo,
   LitoCacheConfig
 } from "./server.js";
 export type { LitoClientAssets } from "./client-assets.js";

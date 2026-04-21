@@ -4,20 +4,34 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import {
+  appendCookie,
   badRequest,
+  createCookieHeader,
+  createCspHeader,
+  createCsrfCookie,
+  createCsrfToken,
   createLitoServer,
+  createSecureCookieHeader,
+  deleteCookie,
   defineApiRoute,
   forbidden,
   html,
   json,
   methodNotAllowed,
   notFound,
+  readJsonBody,
   redirect,
   requireAuth,
   requireRole,
+  setCookie,
+  setSecureCookie,
   unauthorized,
   withCacheControl,
+  withBodyLimit,
   withCors,
+  withCsrf,
+  withCsp,
+  withJsonBody,
   withRequestId,
   withSecurityHeaders,
   withRateLimit
@@ -78,6 +92,61 @@ test("createLitoServer renders SSR pages with middleware-provided request locals
   );
   assert.deepEqual(logs[0], "start:/");
   assert.match(logs[1], /^done:\/:\d+$/);
+});
+
+test("createLitoServer only trusts forwarded headers when trustedProxy is enabled", async () => {
+  const createProxyInfoRoute = () => ({
+    id: "api:proxy",
+    path: "/api/proxy",
+    ...defineApiRoute({
+      get: (context) =>
+        json({
+          clientIp: context.clientIp ?? null,
+          forwardedFor: context.proxy.forwardedFor,
+          host: context.host,
+          protocol: context.protocol
+        })
+    })
+  });
+  const untrustedApp = createLitoServer({
+    appName: "Litoho Test",
+    apiRoutes: [createProxyInfoRoute()]
+  });
+  const trustedApp = createLitoServer({
+    appName: "Litoho Test",
+    trustedProxy: true,
+    apiRoutes: [createProxyInfoRoute()]
+  });
+  const oneHopApp = createLitoServer({
+    appName: "Litoho Test",
+    trustedProxy: {
+      hops: 1
+    },
+    apiRoutes: [createProxyInfoRoute()]
+  });
+
+  const headers = {
+    "x-forwarded-for": "203.0.113.10, 10.0.0.2",
+    "x-forwarded-host": "app.example.com",
+    "x-forwarded-proto": "https"
+  };
+  const untrusted = await untrustedApp.fetch(new Request("http://internal.test/api/proxy", { headers }));
+  const trusted = await trustedApp.fetch(new Request("http://internal.test/api/proxy", { headers }));
+  const oneHop = await oneHopApp.fetch(new Request("http://internal.test/api/proxy", { headers }));
+
+  assert.deepEqual(await untrusted.json(), {
+    clientIp: null,
+    forwardedFor: [],
+    host: "internal.test",
+    protocol: "http"
+  });
+  assert.deepEqual(await trusted.json(), {
+    clientIp: "203.0.113.10",
+    forwardedFor: ["203.0.113.10", "10.0.0.2"],
+    host: "app.example.com",
+    protocol: "https"
+  });
+  assert.equal((await oneHop.json()).clientIp, "203.0.113.10");
 });
 
 test("createLitoServer renders custom 404 pages", async () => {
@@ -472,6 +541,472 @@ test("withRateLimit short-circuits requests after the configured limit", async (
   });
 });
 
+test("withBodyLimit rejects oversized requests and preserves allowed bodies", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withBodyLimit({
+        maxBytes: 8
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:body",
+        path: "/api/body",
+        ...defineApiRoute({
+          post: async (context) => {
+            const body = await context.request.text();
+            return json({
+              ok: true,
+              body
+            });
+          }
+        })
+      }
+    ]
+  });
+
+  const allowed = await app.fetch(
+    new Request("http://litoho.test/api/body", {
+      method: "POST",
+      body: "small"
+    })
+  );
+  const deniedByLength = await app.fetch(
+    new Request("http://litoho.test/api/body", {
+      method: "POST",
+      body: "too-large-body"
+    })
+  );
+  const deniedBody = await deniedByLength.json();
+
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), {
+    ok: true,
+    body: "small"
+  });
+  assert.equal(deniedByLength.status, 413);
+  assert.equal(deniedBody.error.message, "Payload Too Large");
+  assert.equal(deniedBody.error.limit, 8);
+});
+
+test("withBodyLimit can measure chunked bodies without content-length", async () => {
+  const stream = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode("hello"));
+      controller.enqueue(new TextEncoder().encode(" world"));
+      controller.close();
+    }
+  });
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withBodyLimit({
+        maxBytes: 6,
+        response: ({ limit, received }) =>
+          json(
+            {
+              ok: false,
+              limit,
+              received
+            },
+            {
+              status: 422
+            }
+          )
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:chunked",
+        path: "/api/chunked",
+        ...defineApiRoute({
+          post: async (context) => json({ body: await context.request.text() })
+        })
+      }
+    ]
+  });
+
+  const response = await app.fetch(
+    new Request("http://litoho.test/api/chunked", {
+      method: "POST",
+      body: stream,
+      duplex: "half"
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 422);
+  assert.deepEqual(body, {
+    ok: false,
+    limit: 6,
+    received: 11
+  });
+});
+
+test("withJsonBody parses safe JSON bodies and preserves downstream request body", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withJsonBody({
+        maxBytes: 128
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:json",
+        path: "/api/json",
+        ...defineApiRoute({
+          post: async (context) =>
+            json({
+              parsed: readJsonBody(context),
+              raw: await context.request.text()
+            })
+        })
+      }
+    ]
+  });
+
+  const response = await app.fetch(
+    new Request("http://litoho.test/api/json", {
+      method: "POST",
+      body: JSON.stringify({ name: "Litoho", count: 2 }),
+      headers: {
+        "content-type": "application/json; charset=utf-8"
+      }
+    })
+  );
+  const body = await response.json();
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(body.parsed, {
+    name: "Litoho",
+    count: 2
+  });
+  assert.equal(body.raw, "{\"name\":\"Litoho\",\"count\":2}");
+});
+
+test("withJsonBody rejects unsupported, invalid, and oversized JSON requests", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withJsonBody({
+        maxBytes: 8,
+        required: true
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:json-guard",
+        path: "/api/json-guard",
+        ...defineApiRoute({
+          post: () => json({ ok: true })
+        })
+      }
+    ]
+  });
+
+  const unsupported = await app.fetch(
+    new Request("http://litoho.test/api/json-guard", {
+      method: "POST",
+      body: "plain",
+      headers: {
+        "content-type": "text/plain"
+      }
+    })
+  );
+  const invalid = await app.fetch(
+    new Request("http://litoho.test/api/json-guard", {
+      method: "POST",
+      body: "{x",
+      headers: {
+        "content-type": "application/json"
+      }
+    })
+  );
+  const oversized = await app.fetch(
+    new Request("http://litoho.test/api/json-guard", {
+      method: "POST",
+      body: JSON.stringify({ too: "large" }),
+      headers: {
+        "content-type": "application/json"
+      }
+    })
+  );
+
+  assert.equal(unsupported.status, 415);
+  assert.equal((await unsupported.json()).error.reason, "unsupported-content-type");
+  assert.equal(invalid.status, 400);
+  assert.equal((await invalid.json()).error.reason, "invalid-json");
+  assert.equal(oversized.status, 413);
+  assert.equal((await oversized.json()).error.reason, "payload-too-large");
+});
+
+test("withJsonBody supports custom +json content types and response hooks", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withJsonBody({
+        response: ({ reason, status }) =>
+          json(
+            {
+              custom: true,
+              reason
+            },
+            {
+              status
+            }
+          )
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:problem-json",
+        path: "/api/problem-json",
+        ...defineApiRoute({
+          post: (context) => json({ parsed: readJsonBody(context) })
+        })
+      }
+    ]
+  });
+
+  const accepted = await app.fetch(
+    new Request("http://litoho.test/api/problem-json", {
+      method: "POST",
+      body: JSON.stringify({ ok: true }),
+      headers: {
+        "content-type": "application/problem+json"
+      }
+    })
+  );
+  const rejected = await app.fetch(
+    new Request("http://litoho.test/api/problem-json", {
+      method: "POST",
+      body: "not-json",
+      headers: {
+        "content-type": "application/json"
+      }
+    })
+  );
+
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(await accepted.json(), {
+    parsed: {
+      ok: true
+    }
+  });
+  assert.equal(rejected.status, 400);
+  assert.deepEqual(await rejected.json(), {
+    custom: true,
+    reason: "invalid-json"
+  });
+});
+
+test("withCsrf issues a token cookie and protects mutation requests", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withCsrf({
+        tokenGenerator: () => "csrf-fixed"
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:csrf",
+        path: "/api/csrf",
+        ...defineApiRoute({
+          get: () => json({ ok: true }),
+          post: () => json({ ok: true, mutated: true })
+        })
+      }
+    ],
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        render: (context) => `csrf:${String(context.getLocal("csrf.token"))}`
+      }
+    ]
+  });
+
+  const initial = await app.fetch(new Request("http://litoho.test/"));
+  const setCookie = initial.headers.get("set-cookie") ?? "";
+  const denied = await app.fetch(new Request("http://litoho.test/api/csrf", { method: "POST" }));
+  const allowed = await app.fetch(
+    new Request("http://litoho.test/api/csrf", {
+      method: "POST",
+      headers: {
+        cookie: "litoho.csrf=csrf-fixed",
+        "x-csrf-token": "csrf-fixed"
+      }
+    })
+  );
+  const mismatched = await app.fetch(
+    new Request("http://litoho.test/api/csrf", {
+      method: "POST",
+      headers: {
+        cookie: "litoho.csrf=csrf-fixed",
+        "x-csrf-token": "wrong"
+      }
+    })
+  );
+
+  assert.equal(initial.status, 200);
+  assert.match(setCookie, /litoho\.csrf=csrf-fixed/);
+  assert.match(setCookie, /SameSite=Lax/);
+  assert.equal(denied.status, 403);
+  assert.equal(await denied.text(), "Invalid CSRF token");
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), { ok: true, mutated: true });
+  assert.equal(mismatched.status, 403);
+});
+
+test("withCsrf accepts form token sources and supports cookie helpers", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withCsrf({
+        tokenSources: ["form"],
+        tokenGenerator: () => "form-token"
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:form",
+        path: "/api/form",
+        ...defineApiRoute({
+          post: () => json({ ok: true })
+        })
+      }
+    ]
+  });
+
+  const response = await app.fetch(
+    new Request("http://litoho.test/api/form", {
+      method: "POST",
+      body: new URLSearchParams({
+        _csrf: "form-token"
+      }),
+      headers: {
+        cookie: "litoho.csrf=form-token",
+        "content-type": "application/x-www-form-urlencoded"
+      }
+    })
+  );
+  const token = createCsrfToken();
+  const cookie = createCsrfCookie("abc", { secure: true });
+  const customCookie = createCookieHeader("session", "value", { httpOnly: true, sameSite: "Strict" });
+
+  assert.equal(response.status, 200);
+  assert.ok(token.length >= 22);
+  assert.match(cookie, /litoho\.csrf=abc/);
+  assert.match(cookie, /Secure/);
+  assert.match(customCookie, /HttpOnly/);
+  assert.match(customCookie, /SameSite=Strict/);
+});
+
+test("secure cookie helpers create, append, set, and delete cookies", async () => {
+  const secureCookie = createSecureCookieHeader("session", "abc", {
+    maxAge: 60
+  });
+  const insecureCookie = createCookieHeader("theme", "sea", {
+    sameSite: "Lax",
+    secure: false
+  });
+  const responseWithAppend = appendCookie(new Response("ok"), insecureCookie);
+  const responseWithSet = setCookie(new Response("ok"), "theme", "forest", {
+    sameSite: "Strict"
+  });
+  const responseWithSecureSet = setSecureCookie(new Response("ok"), "session", "next", {
+    path: "/admin"
+  });
+  const responseWithDelete = deleteCookie(new Response("ok"), "session", {
+    httpOnly: true,
+    secure: true
+  });
+
+  assert.match(secureCookie, /session=abc/);
+  assert.match(secureCookie, /HttpOnly/);
+  assert.match(secureCookie, /Secure/);
+  assert.match(secureCookie, /SameSite=Lax/);
+  assert.match(secureCookie, /Max-Age=60/);
+  assert.match(responseWithAppend.headers.get("set-cookie") ?? "", /theme=sea/);
+  assert.match(responseWithSet.headers.get("set-cookie") ?? "", /theme=forest/);
+  assert.match(responseWithSet.headers.get("set-cookie") ?? "", /SameSite=Strict/);
+  assert.match(responseWithSecureSet.headers.get("set-cookie") ?? "", /session=next/);
+  assert.match(responseWithSecureSet.headers.get("set-cookie") ?? "", /Path=\/admin/);
+  assert.match(responseWithDelete.headers.get("set-cookie") ?? "", /session=/);
+  assert.match(responseWithDelete.headers.get("set-cookie") ?? "", /Max-Age=0/);
+  assert.match(responseWithDelete.headers.get("set-cookie") ?? "", /Expires=Thu, 01 Jan 1970 00:00:00 GMT/);
+  assert.throws(() => createCookieHeader("unsafe", "value", { path: "/; injected=true" }), /Cookie path/);
+  assert.throws(() => createCookieHeader("unsafe", "value", { domain: "example.com\r\nx: y" }), /Cookie domain/);
+});
+
+test("createCspHeader builds CSP directives from camelCase and kebab-case keys", () => {
+  const header = createCspHeader({
+    directives: {
+      scriptSrc: ["'self'", "https://cdn.example.com"],
+      "img-src": ["'self'", "data:"],
+      upgradeInsecureRequests: true,
+      objectSrc: false
+    }
+  });
+
+  assert.match(header, /default-src 'self'/);
+  assert.match(header, /script-src 'self' https:\/\/cdn\.example\.com/);
+  assert.match(header, /img-src 'self' data:/);
+  assert.match(header, /upgrade-insecure-requests/);
+  assert.doesNotMatch(header, /object-src/);
+});
+
+test("withCsp applies CSP middleware and supports report-only mode", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withCsp({
+        directives: {
+          defaultSrc: ["'self'"],
+          connectSrc: ["'self'", "https://api.example.com"]
+        }
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:csp",
+        path: "/api/csp",
+        ...defineApiRoute({
+          get: () => json({ ok: true })
+        })
+      }
+    ]
+  });
+  const reportOnlyApp = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withCsp({
+        directives: {
+          defaultSrc: ["'self'"]
+        },
+        reportOnly: true
+      })
+    ],
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        render: () => "home"
+      }
+    ]
+  });
+
+  const response = await app.fetch(new Request("http://litoho.test/api/csp"));
+  const reportOnlyResponse = await reportOnlyApp.fetch(new Request("http://litoho.test/"));
+
+  assert.match(response.headers.get("content-security-policy") ?? "", /connect-src 'self' https:\/\/api\.example\.com/);
+  assert.equal(reportOnlyResponse.headers.get("content-security-policy"), null);
+  assert.match(reportOnlyResponse.headers.get("content-security-policy-report-only") ?? "", /default-src 'self'/);
+});
+
 test("withSecurityHeaders, withRequestId, and withCacheControl decorate downstream responses", async () => {
   const app = createLitoServer({
     appName: "Litoho Test",
@@ -510,6 +1045,85 @@ test("withSecurityHeaders, withRequestId, and withCacheControl decorate downstre
   assert.equal(response.headers.get("cache-control"), "private, max-age=60");
 });
 
+test("createLitoServer applies default security headers and can opt out", async () => {
+  const securedApp = createLitoServer({
+    appName: "Litoho Test",
+    apiRoutes: [
+      {
+        id: "api:secure",
+        path: "/api/secure",
+        ...defineApiRoute({
+          get: () => json({ ok: true })
+        })
+      }
+    ],
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        render: () => "secure home"
+      }
+    ]
+  });
+  const optedOutApp = createLitoServer({
+    appName: "Litoho Test",
+    securityHeaders: false,
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        render: () => "plain home"
+      }
+    ]
+  });
+
+  const pageResponse = await securedApp.fetch(new Request("http://litoho.test/"));
+  const apiResponse = await securedApp.fetch(new Request("http://litoho.test/api/secure"));
+  const optedOutResponse = await optedOutApp.fetch(new Request("http://litoho.test/"));
+
+  assert.equal(pageResponse.headers.get("x-frame-options"), "DENY");
+  assert.equal(pageResponse.headers.get("x-content-type-options"), "nosniff");
+  assert.equal(pageResponse.headers.get("referrer-policy"), "no-referrer");
+  assert.equal(pageResponse.headers.get("x-xss-protection"), "0");
+  assert.equal(apiResponse.headers.get("x-frame-options"), "DENY");
+  assert.equal(optedOutResponse.headers.get("x-frame-options"), null);
+});
+
+test("redirect rejects unsafe locations and invalid statuses", () => {
+  assert.equal(redirect("/login").headers.get("location"), "/login");
+  assert.equal(redirect("https://litoho.dev/docs", 303).status, 303);
+  assert.throws(() => redirect("javascript:alert(1)"), /Unsafe redirect protocol/);
+  assert.throws(() => redirect("//evil.test/login"), /Protocol-relative redirects/);
+  assert.throws(() => redirect("/login\r\nset-cookie:owned=true"), /Unsafe redirect location/);
+  assert.throws(() => redirect("/login", 200), /Invalid redirect status/);
+});
+
+test("SSR data serialization escapes script-breaking characters", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    pages: [
+      {
+        id: "home",
+        path: "/",
+        load: () => ({
+          payload: "</script><script>window.__owned=true</script>",
+          ampersand: "&",
+          lineSeparator: "\u2028"
+        }),
+        render: () => "safe"
+      }
+    ]
+  });
+
+  const response = await app.fetch(new Request("http://litoho.test/"));
+  const body = await response.text();
+
+  assert.match(body, /\\u003c\/script\\u003e/);
+  assert.match(body, /\\u0026/);
+  assert.match(body, /\\u2028/);
+  assert.doesNotMatch(body, /<script>window\.__owned=true<\/script>/);
+});
+
 test("createLitoServer serves public assets before page routing", async () => {
   const tempRoot = mkdtempSync(join(tmpdir(), "litoho-public-assets-"));
 
@@ -540,6 +1154,7 @@ test("createLitoServer serves public assets before page routing", async () => {
     const logoResponse = await app.fetch(new Request("http://litoho.test/logo.txt"));
     const robotsResponse = await app.fetch(new Request("http://litoho.test/robots.txt"));
     const imageResponse = await app.fetch(new Request("http://litoho.test/images/hero.svg"));
+    const traversalResponse = await app.fetch(new Request("http://litoho.test/%2e%2e/package.json"));
     const pageResponse = await app.fetch(new Request("http://litoho.test/"));
 
     assert.equal(logoResponse.status, 200);
@@ -548,6 +1163,8 @@ test("createLitoServer serves public assets before page routing", async () => {
     assert.match(await robotsResponse.text(), /User-agent: \*/);
     assert.equal(imageResponse.status, 200);
     assert.match(imageResponse.headers.get("content-type") ?? "", /image\/svg\+xml/);
+    assert.equal(imageResponse.headers.get("x-content-type-options"), "nosniff");
+    assert.notEqual(traversalResponse.status, 200);
     assert.equal(pageResponse.status, 200);
     assert.match(await pageResponse.text(), /home/);
   } finally {

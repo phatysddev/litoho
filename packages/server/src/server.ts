@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve as resolvePath } from "node:path";
+import { sep, resolve as resolvePath } from "node:path";
 import { render } from "@lit-labs/ssr";
 import { collectResult } from "@lit-labs/ssr/lib/render-result.js";
 import { resolveRoute } from "@litoho/router";
@@ -23,6 +23,10 @@ export type LitoRequestContext = {
   url: URL;
   query: URLSearchParams;
   headers: Headers;
+  clientIp?: string;
+  protocol: string;
+  host: string;
+  proxy: LitoTrustedProxyInfo;
   cookies: Readonly<Record<string, string>>;
   getCookie: (name: string) => string | undefined;
   locals: LitoRequestLocals;
@@ -90,6 +94,38 @@ export type LitoServerOptions = {
   middlewares?: readonly LitoMiddleware[];
   env?: LitoServerEnvironment;
   logger?: LitoLoggerHooks;
+  securityHeaders?: LitoSecurityHeadersOptions | false;
+  trustedProxy?: LitoTrustedProxyConfig;
+};
+
+export type LitoTrustedProxyConfig =
+  | boolean
+  | {
+      enabled?: boolean;
+      headers?: {
+        for?: string;
+        host?: string;
+        proto?: string;
+      };
+      hops?: number;
+    };
+
+export type LitoTrustedProxyInfo = {
+  enabled: boolean;
+  clientIp?: string;
+  forwardedFor: string[];
+  host: string;
+  protocol: string;
+};
+
+type NormalizedTrustedProxyConfig = {
+  enabled: boolean;
+  headers: {
+    for: string;
+    host: string;
+    proto: string;
+  };
+  hops: number;
 };
 
 export type LitoDocumentMetaTag = {
@@ -183,7 +219,19 @@ export function json(data: unknown, init: ResponseInit = {}) {
 }
 
 export function redirect(location: string | URL, status = 302) {
-  return Response.redirect(String(location), status);
+  const safeStatus = validateRedirectStatus(status);
+  const safeLocation = createSafeRedirectLocation(location);
+
+  if (safeLocation.startsWith("/")) {
+    return new Response(null, {
+      status: safeStatus,
+      headers: {
+        location: safeLocation
+      }
+    });
+  }
+
+  return Response.redirect(safeLocation, safeStatus);
 }
 
 export function unauthorized(
@@ -322,6 +370,33 @@ export type LitoRateLimitOptions = {
   response?: Response | ((context: LitoMiddlewareContext & { retryAfterSeconds: number }) => Response | Promise<Response>);
 };
 
+export type LitoBodyLimitOptions = {
+  maxBytes?: number;
+  protectedMethods?: string[];
+  protectedPathPrefixes?: string[];
+  response?: Response | ((context: LitoMiddlewareContext & { limit: number; received?: number }) => Response | Promise<Response>);
+  status?: number;
+};
+
+export type LitoJsonBodyErrorReason = "missing-body" | "unsupported-content-type" | "payload-too-large" | "invalid-json";
+
+export type LitoJsonBodyOptions = {
+  contentTypes?: string[];
+  localKey?: string;
+  maxBytes?: number;
+  protectedMethods?: string[];
+  protectedPathPrefixes?: string[];
+  required?: boolean;
+  response?: Response | ((context: LitoMiddlewareContext & {
+    error?: unknown;
+    limit?: number;
+    reason: LitoJsonBodyErrorReason;
+    received?: number;
+    status: number;
+  }) => Response | Promise<Response>);
+  reviver?: (this: unknown, key: string, value: unknown) => unknown;
+};
+
 export type LitoSecurityHeadersOptions = {
   frameOptions?: string;
   contentTypeOptions?: string;
@@ -330,6 +405,18 @@ export type LitoSecurityHeadersOptions = {
   crossOriginResourcePolicy?: string;
   permissionsPolicy?: string;
   contentSecurityPolicy?: string;
+  strictTransportSecurity?: string;
+  xssProtection?: string;
+};
+
+export type LitoCspDirectiveValue = string | string[] | boolean | null | undefined;
+
+export type LitoCspDirectives = Record<string, LitoCspDirectiveValue>;
+
+export type LitoCspOptions = {
+  directives?: LitoCspDirectives;
+  mergeDefaults?: boolean;
+  reportOnly?: boolean;
 };
 
 export type LitoRequestIdOptions = {
@@ -341,6 +428,37 @@ export type LitoRequestIdOptions = {
 export type LitoCacheControlOptions = {
   value?: string;
   protectedPathPrefixes?: string[];
+};
+
+export type LitoCookieOptions = {
+  domain?: string;
+  expires?: Date;
+  httpOnly?: boolean;
+  maxAge?: number;
+  path?: string;
+  sameSite?: "Strict" | "Lax" | "None";
+  secure?: boolean;
+};
+
+export type LitoSecureCookieOptions = LitoCookieOptions;
+
+export type LitoCsrfTokenSource = "header" | "form" | "query";
+
+export type LitoCsrfOptions = {
+  cookieName?: string;
+  cookieOptions?: LitoCookieOptions;
+  formFieldName?: string;
+  headerName?: string;
+  issueCookieOnSafeMethods?: boolean;
+  localKey?: string;
+  protectedMethods?: string[];
+  protectedPathPrefixes?: string[];
+  queryParam?: string;
+  response?: Response | ((context: LitoMiddlewareContext) => Response | Promise<Response>);
+  rotateOnMutation?: boolean;
+  tokenByteLength?: number;
+  tokenGenerator?: () => string;
+  tokenSources?: LitoCsrfTokenSource[];
 };
 
 export function createRequestMetaMiddleware(
@@ -601,7 +719,7 @@ export function withRateLimit(options: LitoRateLimitOptions = {}): LitoMiddlewar
       typeof options.key === "function"
         ? options.key(context)
         : options.key ??
-          `${context.pathname}:${context.headers.get("x-forwarded-for") ?? context.getCookie("visitor") ?? "global"}`;
+          `${context.pathname}:${context.clientIp ?? context.getCookie("visitor") ?? "global"}`;
 
     const now = Date.now();
     const current = rateLimitState.get(resolvedKey);
@@ -656,22 +774,145 @@ export function withRateLimit(options: LitoRateLimitOptions = {}): LitoMiddlewar
   };
 }
 
+export function withBodyLimit(options: LitoBodyLimitOptions = {}): LitoMiddleware {
+  const maxBytes = options.maxBytes ?? 1_048_576;
+  const protectedMethods = new Set((options.protectedMethods ?? ["POST", "PUT", "PATCH", "DELETE"]).map((method) => method.toUpperCase()));
+  const protectedPathPrefixes = options.protectedPathPrefixes ?? [];
+  const status = options.status ?? 413;
+
+  return async (context, next) => {
+    const matchesProtectedPath =
+      protectedPathPrefixes.length === 0 || protectedPathPrefixes.some((prefix) => context.pathname.startsWith(prefix));
+
+    if (!matchesProtectedPath || !protectedMethods.has(context.request.method.toUpperCase()) || !context.request.body) {
+      return next();
+    }
+
+    const contentLength = parseContentLength(context.headers.get("content-length"));
+    if (contentLength !== null && contentLength > maxBytes) {
+      return createBodyLimitResponse(context, {
+        limit: maxBytes,
+        options,
+        received: contentLength,
+        status
+      });
+    }
+
+    const measuredBody = await readRequestBodyWithLimit(context.request, maxBytes);
+    if (measuredBody.exceeded) {
+      return createBodyLimitResponse(context, {
+        limit: maxBytes,
+        options,
+        received: measuredBody.received,
+        status
+      });
+    }
+
+    context.request = recreateRequestWithBody(context.request, measuredBody.body);
+    return next();
+  };
+}
+
+export function withJsonBody(options: LitoJsonBodyOptions = {}): LitoMiddleware {
+  const contentTypes = options.contentTypes ?? ["application/json", "+json"];
+  const localKey = options.localKey ?? "request.json";
+  const maxBytes = options.maxBytes ?? 1_048_576;
+  const protectedMethods = new Set((options.protectedMethods ?? ["POST", "PUT", "PATCH", "DELETE"]).map((method) => method.toUpperCase()));
+  const protectedPathPrefixes = options.protectedPathPrefixes ?? [];
+  const required = options.required ?? false;
+
+  return async (context, next) => {
+    const matchesProtectedPath =
+      protectedPathPrefixes.length === 0 || protectedPathPrefixes.some((prefix) => context.pathname.startsWith(prefix));
+
+    if (!matchesProtectedPath || !protectedMethods.has(context.request.method.toUpperCase())) {
+      return next();
+    }
+
+    if (!context.request.body) {
+      if (!required) {
+        context.setLocal(localKey, undefined);
+        return next();
+      }
+
+      return createJsonBodyErrorResponse(context, {
+        options,
+        reason: "missing-body",
+        status: 400
+      });
+    }
+
+    const contentType = context.headers.get("content-type") ?? "";
+    if (!isJsonContentType(contentType, contentTypes)) {
+      return createJsonBodyErrorResponse(context, {
+        options,
+        reason: "unsupported-content-type",
+        status: 415
+      });
+    }
+
+    const contentLength = parseContentLength(context.headers.get("content-length"));
+    if (contentLength !== null && contentLength > maxBytes) {
+      return createJsonBodyErrorResponse(context, {
+        limit: maxBytes,
+        options,
+        reason: "payload-too-large",
+        received: contentLength,
+        status: 413
+      });
+    }
+
+    const measuredBody = await readRequestBodyWithLimit(context.request, maxBytes);
+    if (measuredBody.exceeded) {
+      return createJsonBodyErrorResponse(context, {
+        limit: maxBytes,
+        options,
+        reason: "payload-too-large",
+        received: measuredBody.received,
+        status: 413
+      });
+    }
+
+    context.request = recreateRequestWithBody(context.request, measuredBody.body);
+
+    const text = new TextDecoder().decode(measuredBody.body);
+    if (text.trim() === "") {
+      if (!required) {
+        context.setLocal(localKey, null);
+        return next();
+      }
+
+      return createJsonBodyErrorResponse(context, {
+        options,
+        reason: "missing-body",
+        status: 400
+      });
+    }
+
+    try {
+      context.setLocal(localKey, JSON.parse(text, options.reviver));
+    } catch (error) {
+      return createJsonBodyErrorResponse(context, {
+        error,
+        options,
+        reason: "invalid-json",
+        status: 400
+      });
+    }
+
+    return next();
+  };
+}
+
+export function readJsonBody<Value = unknown>(
+  context: Pick<LitoRequestContext, "getLocal">,
+  localKey = "request.json"
+) {
+  return context.getLocal<Value>(localKey);
+}
+
 export function withSecurityHeaders(options: LitoSecurityHeadersOptions = {}): LitoMiddleware {
-  const headerEntries = new Map<string, string>();
-
-  headerEntries.set("x-frame-options", options.frameOptions ?? "DENY");
-  headerEntries.set("x-content-type-options", options.contentTypeOptions ?? "nosniff");
-  headerEntries.set("referrer-policy", options.referrerPolicy ?? "no-referrer");
-  headerEntries.set("cross-origin-opener-policy", options.crossOriginOpenerPolicy ?? "same-origin");
-  headerEntries.set("cross-origin-resource-policy", options.crossOriginResourcePolicy ?? "same-origin");
-
-  if (options.permissionsPolicy) {
-    headerEntries.set("permissions-policy", options.permissionsPolicy);
-  }
-
-  if (options.contentSecurityPolicy) {
-    headerEntries.set("content-security-policy", options.contentSecurityPolicy);
-  }
+  const headerEntries = createSecurityHeaderEntries(options);
 
   return async (_context, next) => {
     const response = await next();
@@ -679,11 +920,40 @@ export function withSecurityHeaders(options: LitoSecurityHeadersOptions = {}): L
       return response;
     }
 
-    for (const [key, value] of headerEntries.entries()) {
-      response.headers.set(key, value);
+    return applySecurityHeaders(response, headerEntries);
+  };
+}
+
+export function createCspHeader(options: LitoCspOptions = {}) {
+  const mergeDefaults = options.mergeDefaults ?? true;
+  const directives = new Map<string, LitoCspDirectiveValue>();
+
+  if (mergeDefaults) {
+    for (const [key, value] of Object.entries(defaultCspDirectives)) {
+      directives.set(normalizeCspDirectiveName(key), value);
+    }
+  }
+
+  for (const [key, value] of Object.entries(options.directives ?? {})) {
+    directives.set(normalizeCspDirectiveName(key), value);
+  }
+
+  return [...directives.entries()]
+    .flatMap(([key, value]) => formatCspDirective(key, value))
+    .join("; ");
+}
+
+export function withCsp(options: LitoCspOptions = {}): LitoMiddleware {
+  const headerName = options.reportOnly ? "content-security-policy-report-only" : "content-security-policy";
+  const headerEntries = new Map([[headerName, createCspHeader(options)]]);
+
+  return async (_context, next) => {
+    const response = await next();
+    if (!response) {
+      return response;
     }
 
-    return response;
+    return applySecurityHeaders(response, headerEntries);
   };
 }
 
@@ -724,6 +994,158 @@ export function withCacheControl(options: LitoCacheControlOptions = {}): LitoMid
     }
 
     return response;
+  };
+}
+
+export function createCsrfToken(byteLength = 32) {
+  const bytes = new Uint8Array(Math.max(16, byteLength));
+  crypto.getRandomValues(bytes);
+  return base64UrlEncode(bytes);
+}
+
+export function createCookieHeader(name: string, value: string, options: LitoCookieOptions = {}) {
+  const parts = [`${encodeCookiePart(name)}=${encodeCookiePart(value)}`];
+  const path = options.path ?? "/";
+
+  if (path) {
+    parts.push(`Path=${sanitizeCookieAttributeValue(path, "Cookie path")}`);
+  }
+
+  if (options.domain) {
+    parts.push(`Domain=${sanitizeCookieAttributeValue(options.domain, "Cookie domain")}`);
+  }
+
+  if (typeof options.maxAge === "number") {
+    parts.push(`Max-Age=${Math.floor(options.maxAge)}`);
+  }
+
+  if (options.expires) {
+    parts.push(`Expires=${options.expires.toUTCString()}`);
+  }
+
+  if (options.httpOnly) {
+    parts.push("HttpOnly");
+  }
+
+  if (options.secure) {
+    parts.push("Secure");
+  }
+
+  if (options.sameSite) {
+    parts.push(`SameSite=${options.sameSite}`);
+  }
+
+  return parts.join("; ");
+}
+
+export function createSecureCookieHeader(name: string, value: string, options: LitoSecureCookieOptions = {}) {
+  return createCookieHeader(name, value, {
+    httpOnly: true,
+    sameSite: "Lax",
+    secure: true,
+    ...options
+  });
+}
+
+export function appendCookie(response: Response, cookieHeader: string) {
+  return appendResponseHeader(response, "set-cookie", cookieHeader);
+}
+
+export function setCookie(response: Response, name: string, value: string, options: LitoCookieOptions = {}) {
+  return appendCookie(response, createCookieHeader(name, value, options));
+}
+
+export function setSecureCookie(response: Response, name: string, value: string, options: LitoSecureCookieOptions = {}) {
+  return appendCookie(response, createSecureCookieHeader(name, value, options));
+}
+
+export function deleteCookie(response: Response, name: string, options: LitoCookieOptions = {}) {
+  return appendCookie(
+    response,
+    createCookieHeader(name, "", {
+      ...options,
+      expires: new Date(0),
+      maxAge: 0,
+      path: options.path ?? "/"
+    })
+  );
+}
+
+export function createCsrfCookie(token: string, options: LitoCookieOptions & { name?: string } = {}) {
+  const { name = "litoho.csrf", ...cookieOptions } = options;
+  return createCookieHeader(name, token, {
+    httpOnly: false,
+    sameSite: "Lax",
+    secure: false,
+    ...cookieOptions
+  });
+}
+
+export function withCsrf(options: LitoCsrfOptions = {}): LitoMiddleware {
+  const cookieName = options.cookieName ?? "litoho.csrf";
+  const cookieOptions = options.cookieOptions ?? {};
+  const formFieldName = options.formFieldName ?? "_csrf";
+  const headerName = options.headerName ?? "x-csrf-token";
+  const issueCookieOnSafeMethods = options.issueCookieOnSafeMethods ?? true;
+  const localKey = options.localKey ?? "csrf.token";
+  const protectedMethods = new Set((options.protectedMethods ?? ["POST", "PUT", "PATCH", "DELETE"]).map((method) => method.toUpperCase()));
+  const protectedPathPrefixes = options.protectedPathPrefixes ?? [];
+  const queryParam = options.queryParam ?? "_csrf";
+  const rotateOnMutation = options.rotateOnMutation ?? false;
+  const tokenByteLength = options.tokenByteLength ?? 32;
+  const tokenGenerator = options.tokenGenerator ?? (() => createCsrfToken(tokenByteLength));
+  const tokenSources = options.tokenSources ?? ["header", "form"];
+
+  return async (context, next) => {
+    const matchesProtectedPath =
+      protectedPathPrefixes.length === 0 || protectedPathPrefixes.some((prefix) => context.pathname.startsWith(prefix));
+    const cookieToken = context.getCookie(cookieName);
+    const isProtectedMethod = protectedMethods.has(context.request.method.toUpperCase());
+    const tokenForRequest = cookieToken ?? tokenGenerator();
+    context.setLocal(localKey, tokenForRequest);
+
+    if (!matchesProtectedPath || !isProtectedMethod) {
+      const response = await next();
+      if (!response || !issueCookieOnSafeMethods || cookieToken) {
+        return response;
+      }
+
+      return appendResponseHeader(response, "set-cookie", createCsrfCookie(tokenForRequest, {
+        name: cookieName,
+        ...cookieOptions
+      }));
+    }
+
+    const submittedToken = await readCsrfTokenFromRequest(context, {
+      formFieldName,
+      headerName,
+      queryParam,
+      tokenSources
+    });
+
+    if (!cookieToken || !submittedToken || !constantTimeEqual(cookieToken, submittedToken)) {
+      if (options.response) {
+        return typeof options.response === "function" ? await options.response(context) : options.response;
+      }
+
+      return forbidden("Invalid CSRF token", {
+        headers: {
+          "content-type": "text/plain; charset=utf-8"
+        }
+      });
+    }
+
+    const response = await next();
+    if (!response || !rotateOnMutation) {
+      return response;
+    }
+
+    const nextToken = tokenGenerator();
+    context.setLocal(localKey, nextToken);
+    return appendResponseHeader(response, "set-cookie", createCsrfCookie(nextToken, {
+      name: cookieName,
+      ...cookieOptions
+    }));
   };
 }
 
@@ -835,6 +1257,8 @@ export function createLitoServer(options: LitoServerOptions = {}) {
   const middlewares = options.middlewares ?? [];
   const env = options.env ?? process.env;
   const logger = options.logger;
+  const securityHeaderEntries = options.securityHeaders === false ? new Map<string, string>() : createSecurityHeaderEntries(options.securityHeaders);
+  const trustedProxy = normalizeTrustedProxyConfig(options.trustedProxy);
 
   if (options.publicRoot || options.staticRoot) {
     app.use("*", async (context, next) => {
@@ -846,14 +1270,14 @@ export function createLitoServer(options: LitoServerOptions = {}) {
         ? createStaticAssetResponse(options.publicRoot, context.req.path)
         : undefined;
       if (publicAssetResponse) {
-        return publicAssetResponse;
+        return applySecurityHeaders(publicAssetResponse, securityHeaderEntries);
       }
 
       const builtAssetResponse = options.staticRoot
         ? createStaticAssetResponse(options.staticRoot, context.req.path)
         : undefined;
       if (builtAssetResponse) {
-        return builtAssetResponse;
+        return applySecurityHeaders(builtAssetResponse, securityHeaderEntries);
       }
 
       return next();
@@ -865,7 +1289,9 @@ export function createLitoServer(options: LitoServerOptions = {}) {
     env,
     logger,
     middlewares,
-    routes: apiRoutes
+    routes: apiRoutes,
+    securityHeaderEntries,
+    trustedProxy
   });
 
   app.all("/", async (context) => {
@@ -882,7 +1308,9 @@ export function createLitoServer(options: LitoServerOptions = {}) {
       middlewares,
       notFoundPage: options.notFoundPage,
       pages,
-      request: context.req.raw
+      request: context.req.raw,
+      securityHeaderEntries,
+      trustedProxy
     });
   });
 
@@ -896,7 +1324,9 @@ export function createLitoServer(options: LitoServerOptions = {}) {
       middlewares,
       notFoundPage: options.notFoundPage,
       pages,
-      request: context.req.raw
+      request: context.req.raw,
+      securityHeaderEntries,
+      trustedProxy
     })
   );
 
@@ -911,12 +1341,125 @@ function shouldServeStaticAsset(pathname: string) {
   return pathname.startsWith("/assets/") || pathname.split("/").some((segment) => segment.includes("."));
 }
 
+function normalizeTrustedProxyConfig(config: LitoTrustedProxyConfig | undefined): NormalizedTrustedProxyConfig {
+  if (!config) {
+    return {
+      enabled: false,
+      headers: {
+        for: "x-forwarded-for",
+        host: "x-forwarded-host",
+        proto: "x-forwarded-proto"
+      },
+      hops: 0
+    };
+  }
+
+  if (config === true) {
+    return {
+      enabled: true,
+      headers: {
+        for: "x-forwarded-for",
+        host: "x-forwarded-host",
+        proto: "x-forwarded-proto"
+      },
+      hops: Number.POSITIVE_INFINITY
+    };
+  }
+
+  const hops = typeof config.hops === "number" && config.hops > 0 ? Math.floor(config.hops) : 1;
+
+  return {
+    enabled: config.enabled ?? true,
+    headers: {
+      for: normalizeHeaderName(config.headers?.for ?? "x-forwarded-for"),
+      host: normalizeHeaderName(config.headers?.host ?? "x-forwarded-host"),
+      proto: normalizeHeaderName(config.headers?.proto ?? "x-forwarded-proto")
+    },
+    hops
+  };
+}
+
+function resolveTrustedProxyInfo(
+  request: Request,
+  url: URL,
+  config: NormalizedTrustedProxyConfig
+): LitoTrustedProxyInfo {
+  const fallbackProtocol = url.protocol.replace(/:$/, "") || "http";
+  const fallbackHost = url.host;
+
+  if (!config.enabled) {
+    return {
+      enabled: false,
+      forwardedFor: [],
+      host: fallbackHost,
+      protocol: fallbackProtocol
+    };
+  }
+
+  const forwardedFor = parseForwardedHeaderList(request.headers.get(config.headers.for));
+  const forwardedHost = parseForwardedHeaderList(request.headers.get(config.headers.host))[0];
+  const forwardedProtocol = parseForwardedHeaderList(request.headers.get(config.headers.proto))[0];
+
+  return {
+    enabled: true,
+    clientIp: selectForwardedClientIp(forwardedFor, config.hops),
+    forwardedFor,
+    host: isSafeForwardedHost(forwardedHost) ? forwardedHost : fallbackHost,
+    protocol: isSafeForwardedProtocol(forwardedProtocol) ? forwardedProtocol : fallbackProtocol
+  };
+}
+
+function normalizeHeaderName(headerName: string) {
+  const normalized = headerName.trim().toLowerCase();
+
+  if (!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(normalized)) {
+    throw new TypeError(`Invalid trusted proxy header name: ${headerName}`);
+  }
+
+  return normalized;
+}
+
+function parseForwardedHeaderList(value: string | null) {
+  if (!value || /[\r\n]/.test(value)) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function selectForwardedClientIp(forwardedFor: string[], hops: number) {
+  if (forwardedFor.length === 0) {
+    return undefined;
+  }
+
+  if (!Number.isFinite(hops)) {
+    return forwardedFor[0];
+  }
+
+  return forwardedFor[Math.max(0, forwardedFor.length - hops - 1)];
+}
+
+function isSafeForwardedProtocol(value: string | undefined): value is string {
+  return value === "http" || value === "https";
+}
+
+function isSafeForwardedHost(value: string | undefined): value is string {
+  return Boolean(value && !/[\r\n/\\;]/.test(value));
+}
+
 function createStaticAssetResponse(root: string, pathname: string) {
-  const normalizedRelativePath = pathname.replace(/^\/+/, "");
+  const normalizedRelativePath = decodePathname(pathname).replace(/^\/+/, "");
+  if (normalizedRelativePath.includes("\0") || normalizedRelativePath.split(/[\\/]/).includes("..")) {
+    return undefined;
+  }
+
   const filePath = resolvePath(root, normalizedRelativePath);
   const rootPath = resolvePath(root);
 
-  if (!filePath.startsWith(rootPath)) {
+  if (filePath !== rootPath && !filePath.startsWith(`${rootPath}${sep}`)) {
     return undefined;
   }
 
@@ -980,14 +1523,17 @@ function registerApiRoutes(
     logger?: LitoLoggerHooks;
     middlewares: readonly LitoMiddleware[];
     routes: readonly LitoApiRoute[];
+    securityHeaderEntries: ReadonlyMap<string, string>;
+    trustedProxy: NormalizedTrustedProxyConfig;
   }
 ) {
   if (input.routes.length === 0) {
     app.get("/api/health", (context) => {
-      return context.json({
+      const response = context.json({
         ok: true,
         appName: input.appName
       });
+      return applySecurityHeaders(response, input.securityHeaderEntries);
     });
     return;
   }
@@ -1010,7 +1556,8 @@ function registerApiRoutes(
           env: input.env,
           params: context.req.param(),
           pathname: new URL(context.req.raw.url).pathname,
-          request: context.req.raw
+          request: context.req.raw,
+          trustedProxy: input.trustedProxy
         });
         const loggerContext = createLoggerContext(requestContext, "api", route.id);
 
@@ -1024,12 +1571,13 @@ function registerApiRoutes(
             finalNext: async () => handler(requestContext)
           });
           const response = middlewareResponse ?? createApiErrorResponse(new Error("Litoho API pipeline returned no response."));
+          const securedResponse = applySecurityHeaders(response, input.securityHeaderEntries);
           finalizeRequestTiming(requestContext);
           await input.logger?.onRequestComplete?.({
             ...loggerContext,
-            response
+            response: securedResponse
           });
-          return response;
+          return securedResponse;
         } catch (error) {
           finalizeRequestTiming(requestContext);
           await input.logger?.onRequestError?.({
@@ -1037,7 +1585,8 @@ function registerApiRoutes(
             error,
             status: 500
           });
-          return createApiErrorResponse(error);
+          const response = createApiErrorResponse(error);
+          return applySecurityHeaders(response, input.securityHeaderEntries);
         }
       });
     }
@@ -1048,7 +1597,8 @@ function registerApiRoutes(
           env: input.env,
           params: context.req.param(),
           pathname: new URL(context.req.raw.url).pathname,
-          request: context.req.raw
+          request: context.req.raw,
+          trustedProxy: input.trustedProxy
         });
         const loggerContext = createLoggerContext(requestContext, "api", route.id);
 
@@ -1062,12 +1612,13 @@ function registerApiRoutes(
               routeId: route.id,
               finalNext: async () => methodNotAllowed()
             })) ?? methodNotAllowed();
+          const securedResponse = applySecurityHeaders(response, input.securityHeaderEntries);
           finalizeRequestTiming(requestContext);
           await input.logger?.onRequestComplete?.({
             ...loggerContext,
-            response
+            response: securedResponse
           });
-          return response;
+          return securedResponse;
         } catch (error) {
           finalizeRequestTiming(requestContext);
           await input.logger?.onRequestError?.({
@@ -1075,7 +1626,8 @@ function registerApiRoutes(
             error,
             status: 500
           });
-          return createApiErrorResponse(error);
+          const response = createApiErrorResponse(error);
+          return applySecurityHeaders(response, input.securityHeaderEntries);
         }
       });
     }
@@ -1092,13 +1644,16 @@ async function handlePageRequest(input: {
   notFoundPage?: LitoNotFoundPage;
   pages: readonly LitoPageRoute[];
   request: Request;
+  securityHeaderEntries: ReadonlyMap<string, string>;
+  trustedProxy: NormalizedTrustedProxyConfig;
 }) {
   if (input.pages.length === 0) {
-    return new Response(`${input.appName} server scaffold is running.`, {
+    const response = new Response(`${input.appName} server scaffold is running.`, {
       headers: {
         "content-type": "text/plain; charset=utf-8"
       }
     });
+    return applySecurityHeaders(response, input.securityHeaderEntries);
   }
 
   const url = new URL(input.request.url);
@@ -1107,7 +1662,8 @@ async function handlePageRequest(input: {
     env: input.env,
     params: resolvedRoute?.match.params ?? {},
     pathname: resolvedRoute?.match.pathname ?? url.pathname,
-    request: input.request
+    request: input.request,
+    trustedProxy: input.trustedProxy
   });
 
   if (!resolvedRoute) {
@@ -1153,7 +1709,7 @@ async function handlePageRequest(input: {
       ...loggerContext,
       response
     });
-    return response;
+    return applySecurityHeaders(response, input.securityHeaderEntries);
   }
 
   const loggerContext = createLoggerContext(requestContext, "page", resolvedRoute.route.id);
@@ -1186,7 +1742,7 @@ async function handlePageRequest(input: {
       ...loggerContext,
       response
     });
-    return response;
+    return applySecurityHeaders(response, input.securityHeaderEntries);
   } catch (error) {
     finalizeRequestTiming(requestContext);
     
@@ -1199,7 +1755,7 @@ async function handlePageRequest(input: {
     });
 
     if (input.errorPage) {
-      return renderErrorPage({
+      const response = await renderErrorPage({
         appName: input.appName,
         clientAssets: input.clientAssets,
         context: requestContext,
@@ -1207,14 +1763,16 @@ async function handlePageRequest(input: {
         page: input.errorPage,
         status: 500
       });
+      return applySecurityHeaders(response, input.securityHeaderEntries);
     }
 
-    return new Response("Internal Server Error", {
+    const response = new Response("Internal Server Error", {
       status: 500,
       headers: {
         "content-type": "text/plain; charset=utf-8"
       }
     });
+    return applySecurityHeaders(response, input.securityHeaderEntries);
   }
 }
 
@@ -1375,9 +1933,11 @@ function createRequestContext(input: {
   params: Record<string, string>;
   pathname: string;
   request: Request;
+  trustedProxy: NormalizedTrustedProxyConfig;
 }): LitoRequestContext {
   const locals: LitoRequestLocals = {};
   const url = new URL(input.request.url);
+  const proxy = resolveTrustedProxyInfo(input.request, url, input.trustedProxy);
   const cookies = parseCookies(input.request.headers.get("cookie"));
 
   return {
@@ -1387,6 +1947,10 @@ function createRequestContext(input: {
     url,
     query: url.searchParams,
     headers: input.request.headers,
+    clientIp: proxy.clientIp,
+    protocol: proxy.protocol,
+    host: proxy.host,
+    proxy,
     cookies,
     getCookie: (name) => cookies[name],
     locals,
@@ -1423,16 +1987,13 @@ async function runMiddlewares(input: {
       return input.finalNext ? input.finalNext() : undefined;
     }
 
-    const result = await middleware(
-      {
-        ...input.context,
-        kind: input.kind,
-        routeId: input.routeId
-      },
-      async () => {
-        return dispatch(index + 1);
-      }
-    );
+    const middlewareContext = input.context as LitoMiddlewareContext;
+    middlewareContext.kind = input.kind;
+    middlewareContext.routeId = input.routeId;
+
+    const result = await middleware(middlewareContext, async () => {
+      return dispatch(index + 1);
+    });
     return result ?? undefined;
   };
 
@@ -1451,6 +2012,277 @@ function createApiErrorResponse(error: unknown) {
       status: 500
     }
   );
+}
+
+function createSecurityHeaderEntries(options: LitoSecurityHeadersOptions = {}) {
+  const headerEntries = new Map<string, string>();
+
+  headerEntries.set("x-frame-options", options.frameOptions ?? "DENY");
+  headerEntries.set("x-content-type-options", options.contentTypeOptions ?? "nosniff");
+  headerEntries.set("referrer-policy", options.referrerPolicy ?? "no-referrer");
+  headerEntries.set("cross-origin-opener-policy", options.crossOriginOpenerPolicy ?? "same-origin");
+  headerEntries.set("cross-origin-resource-policy", options.crossOriginResourcePolicy ?? "same-origin");
+  headerEntries.set("x-xss-protection", options.xssProtection ?? "0");
+
+  if (options.permissionsPolicy) {
+    headerEntries.set("permissions-policy", options.permissionsPolicy);
+  }
+
+  if (options.contentSecurityPolicy) {
+    headerEntries.set("content-security-policy", options.contentSecurityPolicy);
+  }
+
+  if (options.strictTransportSecurity) {
+    headerEntries.set("strict-transport-security", options.strictTransportSecurity);
+  }
+
+  return headerEntries;
+}
+
+const defaultCspDirectives: LitoCspDirectives = {
+  defaultSrc: ["'self'"],
+  objectSrc: ["'none'"],
+  baseUri: ["'self'"],
+  frameAncestors: ["'none'"]
+};
+
+function formatCspDirective(key: string, value: LitoCspDirectiveValue) {
+  if (value === false || value === null || value === undefined) {
+    return [];
+  }
+
+  if (value === true) {
+    return [key];
+  }
+
+  const values = Array.isArray(value) ? value : value.split(/\s+/).filter(Boolean);
+  if (values.length === 0) {
+    return [key];
+  }
+
+  return [`${key} ${values.join(" ")}`];
+}
+
+function normalizeCspDirectiveName(value: string) {
+  if (value.includes("-")) {
+    return value.toLowerCase();
+  }
+
+  return value.replace(/[A-Z]/g, (match) => `-${match.toLowerCase()}`).toLowerCase();
+}
+
+function applySecurityHeaders(response: Response, entries: ReadonlyMap<string, string>) {
+  if (entries.size === 0) {
+    return response;
+  }
+
+  try {
+    applyHeaderEntries(response.headers, entries);
+    return response;
+  } catch {
+    const headers = new Headers(response.headers);
+    applyHeaderEntries(headers, entries);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+}
+
+function applyHeaderEntries(headers: Headers, entries: ReadonlyMap<string, string>) {
+  for (const [key, value] of entries.entries()) {
+    if (!headers.has(key)) {
+      headers.set(key, value);
+    }
+  }
+}
+
+function appendResponseHeader(response: Response, key: string, value: string) {
+  try {
+    response.headers.append(key, value);
+    return response;
+  } catch {
+    const headers = new Headers(response.headers);
+    headers.append(key, value);
+    return new Response(response.body, {
+      status: response.status,
+      statusText: response.statusText,
+      headers
+    });
+  }
+}
+
+function parseContentLength(value: string | null) {
+  if (value === null) {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+}
+
+async function readRequestBodyWithLimit(request: Request, maxBytes: number) {
+  const reader = request.body?.getReader();
+  if (!reader) {
+    return {
+      body: new Uint8Array(),
+      exceeded: false,
+      received: 0
+    };
+  }
+
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        return {
+          body: concatUint8Arrays(chunks, received),
+          exceeded: false,
+          received
+        };
+      }
+
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel();
+        return {
+          body: new Uint8Array(),
+          exceeded: true,
+          received
+        };
+      }
+
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function recreateRequestWithBody(request: Request, body: Uint8Array) {
+  return new Request(request.url, {
+    body,
+    headers: new Headers(request.headers),
+    method: request.method,
+    signal: request.signal,
+    ...(request.method === "GET" || request.method === "HEAD" ? {} : { duplex: "half" })
+  } as RequestInit & { duplex?: "half" });
+}
+
+function concatUint8Arrays(chunks: Uint8Array[], totalLength: number) {
+  const output = new Uint8Array(totalLength);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    output.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return output;
+}
+
+async function createBodyLimitResponse(
+  context: LitoMiddlewareContext,
+  input: {
+    limit: number;
+    options: LitoBodyLimitOptions;
+    received?: number;
+    status: number;
+  }
+) {
+  if (input.options.response) {
+    return typeof input.options.response === "function"
+      ? await input.options.response({
+          ...context,
+          limit: input.limit,
+          received: input.received
+        })
+      : input.options.response;
+  }
+
+  return json(
+    {
+      ok: false,
+      error: {
+        message: "Payload Too Large",
+        limit: input.limit,
+        received: input.received
+      }
+    },
+    {
+      status: input.status
+    }
+  );
+}
+
+async function createJsonBodyErrorResponse(
+  context: LitoMiddlewareContext,
+  input: {
+    error?: unknown;
+    limit?: number;
+    options: LitoJsonBodyOptions;
+    reason: LitoJsonBodyErrorReason;
+    received?: number;
+    status: number;
+  }
+) {
+  if (input.options.response) {
+    return typeof input.options.response === "function"
+      ? await input.options.response({
+          ...context,
+          error: input.error,
+          limit: input.limit,
+          reason: input.reason,
+          received: input.received,
+          status: input.status
+        })
+      : input.options.response;
+  }
+
+  return json(
+    {
+      ok: false,
+      error: {
+        message: createJsonBodyErrorMessage(input.reason),
+        reason: input.reason,
+        limit: input.limit,
+        received: input.received
+      }
+    },
+    {
+      status: input.status
+    }
+  );
+}
+
+function createJsonBodyErrorMessage(reason: LitoJsonBodyErrorReason) {
+  switch (reason) {
+    case "missing-body":
+      return "JSON body is required";
+    case "unsupported-content-type":
+      return "Unsupported JSON content type";
+    case "payload-too-large":
+      return "Payload Too Large";
+    case "invalid-json":
+      return "Invalid JSON body";
+  }
+}
+
+function isJsonContentType(contentType: string, allowedContentTypes: string[]) {
+  const normalizedContentType = contentType.split(";")[0]?.trim().toLowerCase() ?? "";
+
+  return allowedContentTypes.some((allowedType) => {
+    const normalizedAllowedType = allowedType.toLowerCase();
+    if (normalizedAllowedType.startsWith("+")) {
+      return normalizedContentType.endsWith(normalizedAllowedType);
+    }
+
+    return normalizedContentType === normalizedAllowedType;
+  });
 }
 
 function createHtmlResponse(input: {
@@ -1489,9 +2321,11 @@ function createHtmlDocument(input: {
   document?: LitoDocumentDefinition;
 }) {
   const clientScript = (input.clientAssets?.scripts ?? [])
-    .map((script) => `<script type="module" src="${script}"></script>`)
+    .filter(isSafeAssetUrl)
+    .map((script) => `<script type="module" src="${escapeHtml(script)}"></script>`)
     .join("\n    ");
   const clientStyles = (input.clientAssets?.styles ?? [])
+    .filter(isSafeAssetUrl)
     .map((style) => `<link rel="stylesheet" href="${escapeHtml(style)}" />`)
     .join("\n    ");
   const payload = { pageData: input.data, actionData: input.actionData };
@@ -1527,7 +2361,12 @@ function createHtmlDocument(input: {
 }
 
 function serializePageData(data: unknown) {
-  return JSON.stringify(data ?? null).replace(/</g, "\\u003c");
+  return JSON.stringify(data ?? null)
+    .replace(/</g, "\\u003c")
+    .replace(/>/g, "\\u003e")
+    .replace(/&/g, "\\u0026")
+    .replace(/\u2028/g, "\\u2028")
+    .replace(/\u2029/g, "\\u2029");
 }
 
 async function resolveDocumentDefinition<ContextType>(
@@ -1566,6 +2405,145 @@ function createLinkTag(tag: LitoDocumentLinkTag) {
   return `<link ${attributes} />`;
 }
 
+function createSafeRedirectLocation(location: string | URL) {
+  const rawLocation = String(location).trim();
+
+  if (rawLocation === "" || /[\r\n]/.test(rawLocation)) {
+    throw new TypeError("Unsafe redirect location.");
+  }
+
+  if (rawLocation.startsWith("/")) {
+    if (rawLocation.startsWith("//")) {
+      throw new TypeError("Protocol-relative redirects are not allowed.");
+    }
+
+    return rawLocation;
+  }
+
+  const parsedUrl = new URL(rawLocation);
+  if (parsedUrl.protocol !== "http:" && parsedUrl.protocol !== "https:") {
+    throw new TypeError(`Unsafe redirect protocol: ${parsedUrl.protocol}`);
+  }
+
+  return parsedUrl.toString();
+}
+
+function validateRedirectStatus(status: number) {
+  const validStatuses = new Set([301, 302, 303, 307, 308]);
+
+  if (!validStatuses.has(status)) {
+    throw new RangeError(`Invalid redirect status: ${status}`);
+  }
+
+  return status;
+}
+
+function isSafeAssetUrl(value: string) {
+  if (value === "" || /[\r\n]/.test(value)) {
+    return false;
+  }
+
+  if (value.startsWith("/") && !value.startsWith("//")) {
+    return true;
+  }
+
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function readCsrfTokenFromRequest(
+  context: LitoMiddlewareContext,
+  options: {
+    formFieldName: string;
+    headerName: string;
+    queryParam: string;
+    tokenSources: LitoCsrfTokenSource[];
+  }
+) {
+  for (const source of options.tokenSources) {
+    if (source === "header") {
+      const headerValue = context.headers.get(options.headerName);
+      if (headerValue) {
+        return headerValue;
+      }
+    }
+
+    if (source === "query") {
+      const queryValue = context.query.get(options.queryParam);
+      if (queryValue) {
+        return queryValue;
+      }
+    }
+
+    if (source === "form") {
+      const formValue = await readCsrfTokenFromForm(context.request, options.formFieldName);
+      if (formValue) {
+        return formValue;
+      }
+    }
+  }
+
+  return null;
+}
+
+async function readCsrfTokenFromForm(request: Request, formFieldName: string) {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (!contentType.includes("application/x-www-form-urlencoded") && !contentType.includes("multipart/form-data")) {
+    return null;
+  }
+
+  try {
+    const value = (await request.clone().formData()).get(formFieldName);
+    return typeof value === "string" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function constantTimeEqual(left: string, right: string) {
+  const leftBytes = new TextEncoder().encode(left);
+  const rightBytes = new TextEncoder().encode(right);
+  const length = Math.max(leftBytes.length, rightBytes.length);
+  let difference = leftBytes.length ^ rightBytes.length;
+
+  for (let index = 0; index < length; index += 1) {
+    difference |= (leftBytes[index] ?? 0) ^ (rightBytes[index] ?? 0);
+  }
+
+  return difference === 0;
+}
+
+function base64UrlEncode(bytes: Uint8Array) {
+  let binary = "";
+
+  for (const byte of bytes) {
+    binary += String.fromCharCode(byte);
+  }
+
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function encodeCookiePart(value: string) {
+  if (/[\r\n;]/.test(value)) {
+    throw new TypeError("Cookie values cannot contain control characters or semicolons.");
+  }
+
+  return encodeURIComponent(value);
+}
+
+function sanitizeCookieAttributeValue(value: string, label: string) {
+  if (/[\r\n;]/.test(value)) {
+    throw new TypeError(`${label} cannot contain control characters or semicolons.`);
+  }
+
+  return value;
+}
+
 function parseCookies(cookieHeader: string | null) {
   if (!cookieHeader) {
     return {} as Readonly<Record<string, string>>;
@@ -1581,12 +2559,24 @@ function parseCookies(cookieHeader: string | null) {
         return [part, ""] as const;
       }
 
-      const key = decodeURIComponent(part.slice(0, separatorIndex));
-      const value = decodeURIComponent(part.slice(separatorIndex + 1));
+      const key = safeDecodeURIComponent(part.slice(0, separatorIndex));
+      const value = safeDecodeURIComponent(part.slice(separatorIndex + 1));
       return [key, value] as const;
     });
 
   return Object.freeze(Object.fromEntries(entries));
+}
+
+function decodePathname(pathname: string) {
+  return safeDecodeURIComponent(pathname);
+}
+
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function createLoggerContext(context: LitoRequestContext, kind: "page" | "api", routeId?: string): LitoMiddlewareContext {
