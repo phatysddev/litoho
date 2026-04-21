@@ -32,7 +32,9 @@ import {
   withCsrf,
   withCsp,
   withJsonBody,
+  withOriginCheck,
   withRequestId,
+  withRequestTimeout,
   withSecurityHeaders,
   withRateLimit
 } from "../../server/dist/index.js";
@@ -147,6 +149,99 @@ test("createLitoServer only trusts forwarded headers when trustedProxy is enable
     protocol: "https"
   });
   assert.equal((await oneHop.json()).clientIp, "203.0.113.10");
+});
+
+test("createLitoServer rejects hosts outside the allowlist", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    allowedHosts: ["app.example.com", "*.tenant.example.com"],
+    apiRoutes: [
+      {
+        id: "api:host",
+        path: "/api/host",
+        ...defineApiRoute({
+          get: (context) =>
+            json({
+              host: context.host
+            })
+        })
+      }
+    ]
+  });
+
+  const allowed = await app.fetch(new Request("http://app.example.com/api/host"));
+  const wildcardAllowed = await app.fetch(new Request("http://team.tenant.example.com/api/host"));
+  const denied = await app.fetch(new Request("http://evil.example.com/api/host"));
+
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), {
+    host: "app.example.com"
+  });
+  assert.equal(wildcardAllowed.status, 200);
+  assert.equal(denied.status, 421);
+  assert.equal(await denied.text(), "Host Not Allowed");
+  assert.equal(denied.headers.get("x-content-type-options"), "nosniff");
+});
+
+test("createLitoServer applies host allowlist to trusted forwarded hosts", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    trustedProxy: true,
+    allowedHosts: {
+      hosts: [/^app\.example\.com$/],
+      response: () =>
+        json(
+          {
+            ok: false,
+            error: "host_not_allowed"
+          },
+          {
+            status: 400
+          }
+        )
+    },
+    apiRoutes: [
+      {
+        id: "api:proxy-host",
+        path: "/api/proxy-host",
+        ...defineApiRoute({
+          get: (context) =>
+            json({
+              host: context.host,
+              protocol: context.protocol
+            })
+        })
+      }
+    ]
+  });
+
+  const allowed = await app.fetch(
+    new Request("http://internal.test/api/proxy-host", {
+      headers: {
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-proto": "https"
+      }
+    })
+  );
+  const denied = await app.fetch(
+    new Request("http://internal.test/api/proxy-host", {
+      headers: {
+        "x-forwarded-host": "evil.example.com",
+        "x-forwarded-proto": "https"
+      }
+    })
+  );
+
+  assert.equal(allowed.status, 200);
+  assert.deepEqual(await allowed.json(), {
+    host: "app.example.com",
+    protocol: "https"
+  });
+  assert.equal(denied.status, 400);
+  assert.deepEqual(await denied.json(), {
+    ok: false,
+    error: "host_not_allowed"
+  });
 });
 
 test("createLitoServer renders custom 404 pages", async () => {
@@ -541,6 +636,104 @@ test("withRateLimit short-circuits requests after the configured limit", async (
   });
 });
 
+test("withRequestTimeout returns 408 and aborts the request signal", async () => {
+  let sawAbort = false;
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withRequestTimeout({
+        timeoutMs: 5
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:timeout",
+        path: "/api/timeout",
+        ...defineApiRoute({
+          get: async (context) => {
+            context.request.signal.addEventListener("abort", () => {
+              sawAbort = true;
+            });
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return json({ ok: true });
+          }
+        })
+      }
+    ]
+  });
+
+  const response = await app.fetch(new Request("http://litoho.test/api/timeout"));
+  const body = await response.json();
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(response.status, 408);
+  assert.deepEqual(body, {
+    ok: false,
+    error: {
+      message: "Request Timeout",
+      timeoutMs: 5
+    }
+  });
+  assert.equal(sawAbort, true);
+});
+
+test("withRequestTimeout supports custom responses and scoped paths", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [
+      withRequestTimeout({
+        protectedPathPrefixes: ["/api/slow"],
+        response: ({ timeoutMs }) =>
+          json(
+            {
+              ok: false,
+              timeoutMs
+            },
+            {
+              status: 504
+            }
+          ),
+        timeoutMs: 5
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:slow",
+        path: "/api/slow",
+        ...defineApiRoute({
+          get: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            return json({ ok: true });
+          }
+        })
+      },
+      {
+        id: "api:fast",
+        path: "/api/fast",
+        ...defineApiRoute({
+          get: async () => {
+            await new Promise((resolve) => setTimeout(resolve, 10));
+            return json({ ok: true });
+          }
+        })
+      }
+    ]
+  });
+
+  const timedOut = await app.fetch(new Request("http://litoho.test/api/slow"));
+  const skipped = await app.fetch(new Request("http://litoho.test/api/fast"));
+
+  assert.equal(timedOut.status, 504);
+  assert.deepEqual(await timedOut.json(), {
+    ok: false,
+    timeoutMs: 5
+  });
+  assert.equal(skipped.status, 200);
+  assert.deepEqual(await skipped.json(), {
+    ok: true
+  });
+});
+
 test("withBodyLimit rejects oversized requests and preserves allowed bodies", async () => {
   const app = createLitoServer({
     appName: "Litoho Test",
@@ -903,6 +1096,144 @@ test("withCsrf accepts form token sources and supports cookie helpers", async ()
   assert.match(cookie, /Secure/);
   assert.match(customCookie, /HttpOnly/);
   assert.match(customCookie, /SameSite=Strict/);
+});
+
+test("withOriginCheck protects mutation requests by same-origin by default", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    middlewares: [withOriginCheck()],
+    apiRoutes: [
+      {
+        id: "api:origin",
+        path: "/api/origin",
+        ...defineApiRoute({
+          get: () => json({ ok: true, method: "get" }),
+          post: () => json({ ok: true, method: "post" })
+        })
+      }
+    ]
+  });
+
+  const safeMethod = await app.fetch(
+    new Request("http://litoho.test/api/origin", {
+      headers: {
+        origin: "https://evil.test"
+      }
+    })
+  );
+  const sameOrigin = await app.fetch(
+    new Request("http://litoho.test/api/origin", {
+      method: "POST",
+      headers: {
+        origin: "http://litoho.test"
+      }
+    })
+  );
+  const crossOrigin = await app.fetch(
+    new Request("http://litoho.test/api/origin", {
+      method: "POST",
+      headers: {
+        origin: "https://evil.test"
+      }
+    })
+  );
+  const missingOrigin = await app.fetch(
+    new Request("http://litoho.test/api/origin", {
+      method: "POST"
+    })
+  );
+
+  assert.equal(safeMethod.status, 200);
+  assert.equal(sameOrigin.status, 200);
+  assert.deepEqual(await sameOrigin.json(), { ok: true, method: "post" });
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(await crossOrigin.text(), "Invalid request origin");
+  assert.equal(missingOrigin.status, 403);
+});
+
+test("withOriginCheck supports allowlists, custom responses, and trusted proxy origin", async () => {
+  const app = createLitoServer({
+    appName: "Litoho Test",
+    trustedProxy: true,
+    middlewares: [
+      withOriginCheck({
+        allowedOrigins: ["https://admin.example.com", /^https:\/\/preview-\d+\.example\.com$/],
+        response: ({ origin }) =>
+          json(
+            {
+              ok: false,
+              origin
+            },
+            {
+              status: 418
+            }
+          )
+      })
+    ],
+    apiRoutes: [
+      {
+        id: "api:trusted-origin",
+        path: "/api/trusted-origin",
+        ...defineApiRoute({
+          post: (context) =>
+            json({
+              ok: true,
+              host: context.host,
+              protocol: context.protocol
+            })
+        })
+      }
+    ]
+  });
+
+  const trustedProxySameOrigin = await app.fetch(
+    new Request("http://internal.test/api/trusted-origin", {
+      method: "POST",
+      headers: {
+        origin: "https://app.example.com",
+        "x-forwarded-host": "app.example.com",
+        "x-forwarded-proto": "https"
+      }
+    })
+  );
+  const explicitOrigin = await app.fetch(
+    new Request("http://internal.test/api/trusted-origin", {
+      method: "POST",
+      headers: {
+        origin: "https://admin.example.com"
+      }
+    })
+  );
+  const regexOrigin = await app.fetch(
+    new Request("http://internal.test/api/trusted-origin", {
+      method: "POST",
+      headers: {
+        origin: "https://preview-42.example.com"
+      }
+    })
+  );
+  const denied = await app.fetch(
+    new Request("http://internal.test/api/trusted-origin", {
+      method: "POST",
+      headers: {
+        origin: "https://evil.example.com"
+      }
+    })
+  );
+
+  assert.equal(trustedProxySameOrigin.status, 200);
+  assert.deepEqual(await trustedProxySameOrigin.json(), {
+    ok: true,
+    host: "app.example.com",
+    protocol: "https"
+  });
+  assert.equal(explicitOrigin.status, 200);
+  assert.equal(regexOrigin.status, 200);
+  assert.equal(denied.status, 418);
+  assert.deepEqual(await denied.json(), {
+    ok: false,
+    origin: "https://evil.example.com"
+  });
 });
 
 test("secure cookie helpers create, append, set, and delete cookies", async () => {

@@ -96,7 +96,18 @@ export type LitoServerOptions = {
   logger?: LitoLoggerHooks;
   securityHeaders?: LitoSecurityHeadersOptions | false;
   trustedProxy?: LitoTrustedProxyConfig;
+  allowedHosts?: LitoHostAllowlistConfig;
 };
+
+export type LitoAllowedHost = string | RegExp | ((host: string, request: Request) => boolean);
+
+export type LitoHostAllowlistConfig =
+  | readonly LitoAllowedHost[]
+  | {
+      hosts: readonly LitoAllowedHost[];
+      includePort?: boolean;
+      response?: Response | ((context: { host: string; request: Request }) => Response | Promise<Response>);
+    };
 
 export type LitoTrustedProxyConfig =
   | boolean
@@ -126,6 +137,12 @@ type NormalizedTrustedProxyConfig = {
     proto: string;
   };
   hops: number;
+};
+
+type NormalizedHostAllowlistConfig = {
+  hosts: readonly LitoAllowedHost[];
+  includePort: boolean;
+  response?: Response | ((context: { host: string; request: Request }) => Response | Promise<Response>);
 };
 
 export type LitoDocumentMetaTag = {
@@ -378,6 +395,15 @@ export type LitoBodyLimitOptions = {
   status?: number;
 };
 
+export type LitoRequestTimeoutOptions = {
+  localKey?: string;
+  protectedMethods?: string[];
+  protectedPathPrefixes?: string[];
+  response?: Response | ((context: LitoMiddlewareContext & { timeoutMs: number }) => Response | Promise<Response>);
+  status?: number;
+  timeoutMs?: number;
+};
+
 export type LitoJsonBodyErrorReason = "missing-body" | "unsupported-content-type" | "payload-too-large" | "invalid-json";
 
 export type LitoJsonBodyOptions = {
@@ -459,6 +485,18 @@ export type LitoCsrfOptions = {
   tokenByteLength?: number;
   tokenGenerator?: () => string;
   tokenSources?: LitoCsrfTokenSource[];
+};
+
+export type LitoAllowedOrigin = string | RegExp | ((origin: string, context: LitoMiddlewareContext) => boolean);
+
+export type LitoOriginCheckOptions = {
+  allowSameOrigin?: boolean;
+  allowedOrigins?: readonly LitoAllowedOrigin[];
+  allowMissingOrigin?: boolean;
+  protectedMethods?: string[];
+  protectedPathPrefixes?: string[];
+  response?: Response | ((context: LitoMiddlewareContext & { origin: string | null }) => Response | Promise<Response>);
+  status?: number;
 };
 
 export function createRequestMetaMiddleware(
@@ -771,6 +809,56 @@ export function withRateLimit(options: LitoRateLimitOptions = {}): LitoMiddlewar
 
     current.count += 1;
     return next();
+  };
+}
+
+export function withRequestTimeout(options: LitoRequestTimeoutOptions = {}): LitoMiddleware {
+  const localKey = options.localKey ?? "request.timeoutSignal";
+  const protectedMethods = options.protectedMethods
+    ? new Set(options.protectedMethods.map((method) => method.toUpperCase()))
+    : undefined;
+  const protectedPathPrefixes = options.protectedPathPrefixes ?? [];
+  const status = options.status ?? 408;
+  const timeoutMs = options.timeoutMs ?? 30_000;
+
+  return async (context, next) => {
+    const matchesProtectedPath =
+      protectedPathPrefixes.length === 0 || protectedPathPrefixes.some((prefix) => context.pathname.startsWith(prefix));
+
+    if (!matchesProtectedPath || (protectedMethods && !protectedMethods.has(context.request.method.toUpperCase()))) {
+      return next();
+    }
+
+    if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+      return next();
+    }
+
+    const controller = new AbortController();
+    context.request = recreateRequestWithSignal(context.request, controller.signal);
+    context.setLocal(localKey, controller.signal);
+
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let didTimeout = false;
+    const timeoutResponse = new Promise<Response>((resolve) => {
+      timeoutId = setTimeout(() => {
+        didTimeout = true;
+        controller.abort(new Error(`Request timed out after ${timeoutMs}ms.`));
+        resolve(createRequestTimeoutResponse(context, {
+          options,
+          status,
+          timeoutMs
+        }));
+      }, timeoutMs);
+    });
+
+    const downstreamResponse = Promise.resolve(next());
+    const response = await Promise.race([downstreamResponse, timeoutResponse]);
+
+    if (!didTimeout && timeoutId) {
+      clearTimeout(timeoutId);
+    }
+
+    return response;
   };
 }
 
@@ -1149,6 +1237,47 @@ export function withCsrf(options: LitoCsrfOptions = {}): LitoMiddleware {
   };
 }
 
+export function withOriginCheck(options: LitoOriginCheckOptions = {}): LitoMiddleware {
+  const allowMissingOrigin = options.allowMissingOrigin ?? false;
+  const allowSameOrigin = options.allowSameOrigin ?? true;
+  const allowedOrigins = options.allowedOrigins ?? [];
+  const protectedMethods = new Set((options.protectedMethods ?? ["POST", "PUT", "PATCH", "DELETE"]).map((method) => method.toUpperCase()));
+  const protectedPathPrefixes = options.protectedPathPrefixes ?? [];
+  const status = options.status ?? 403;
+
+  return async (context, next) => {
+    const matchesProtectedPath =
+      protectedPathPrefixes.length === 0 || protectedPathPrefixes.some((prefix) => context.pathname.startsWith(prefix));
+
+    if (!matchesProtectedPath || !protectedMethods.has(context.request.method.toUpperCase())) {
+      return next();
+    }
+
+    const origin = normalizeOrigin(context.headers.get("origin"));
+
+    if (!origin && allowMissingOrigin) {
+      return next();
+    }
+
+    if (origin && isAllowedOrigin(origin, context, { allowSameOrigin, allowedOrigins })) {
+      return next();
+    }
+
+    if (options.response) {
+      return typeof options.response === "function"
+        ? await options.response({ ...context, origin })
+        : options.response;
+    }
+
+    return forbidden("Invalid request origin", {
+      status,
+      headers: {
+        "content-type": "text/plain; charset=utf-8"
+      }
+    });
+  };
+}
+
 export function composeMiddlewares(...middlewares: Array<LitoMiddleware | false | null | undefined>): LitoMiddleware {
   const activeMiddlewares = middlewares.filter(Boolean) as LitoMiddleware[];
 
@@ -1259,6 +1388,21 @@ export function createLitoServer(options: LitoServerOptions = {}) {
   const logger = options.logger;
   const securityHeaderEntries = options.securityHeaders === false ? new Map<string, string>() : createSecurityHeaderEntries(options.securityHeaders);
   const trustedProxy = normalizeTrustedProxyConfig(options.trustedProxy);
+  const allowedHosts = normalizeHostAllowlistConfig(options.allowedHosts);
+
+  if (allowedHosts) {
+    app.use("*", async (context, next) => {
+      const url = new URL(context.req.raw.url);
+      const proxy = resolveTrustedProxyInfo(context.req.raw, url, trustedProxy);
+
+      if (!isAllowedHost(proxy.host, context.req.raw, allowedHosts)) {
+        const response = await createHostNotAllowedResponse(proxy.host, context.req.raw, allowedHosts);
+        return applySecurityHeaders(response, securityHeaderEntries);
+      }
+
+      return next();
+    });
+  }
 
   if (options.publicRoot || options.staticRoot) {
     app.use("*", async (context, next) => {
@@ -1339,6 +1483,95 @@ function shouldServeStaticAsset(pathname: string) {
   }
 
   return pathname.startsWith("/assets/") || pathname.split("/").some((segment) => segment.includes("."));
+}
+
+function normalizeHostAllowlistConfig(
+  config: LitoHostAllowlistConfig | undefined
+): NormalizedHostAllowlistConfig | undefined {
+  if (!config) {
+    return undefined;
+  }
+
+  if (!("hosts" in config)) {
+    return {
+      hosts: config,
+      includePort: false
+    };
+  }
+
+  return {
+    hosts: config.hosts,
+    includePort: config.includePort ?? false,
+    response: config.response
+  };
+}
+
+function isAllowedHost(host: string, request: Request, config: NormalizedHostAllowlistConfig) {
+  const normalizedHost = normalizeHostForAllowlist(host, config.includePort);
+
+  if (!normalizedHost || /[\r\n/\\;]/.test(normalizedHost)) {
+    return false;
+  }
+
+  return config.hosts.some((allowedHost) => {
+    if (typeof allowedHost === "function") {
+      return allowedHost(normalizedHost, request);
+    }
+
+    if (allowedHost instanceof RegExp) {
+      return allowedHost.test(normalizedHost);
+    }
+
+    return matchAllowedHostPattern(normalizedHost, allowedHost, config.includePort);
+  });
+}
+
+async function createHostNotAllowedResponse(
+  host: string,
+  request: Request,
+  config: NormalizedHostAllowlistConfig
+) {
+  if (config.response) {
+    return typeof config.response === "function"
+      ? await config.response({ host, request })
+      : config.response;
+  }
+
+  return new Response("Host Not Allowed", {
+    status: 421,
+    headers: {
+      "content-type": "text/plain; charset=utf-8"
+    }
+  });
+}
+
+function normalizeHostForAllowlist(host: string, includePort: boolean) {
+  const normalized = host.trim().toLowerCase();
+
+  if (includePort) {
+    return normalized;
+  }
+
+  if (normalized.startsWith("[") && normalized.includes("]")) {
+    return normalized.slice(0, normalized.indexOf("]") + 1);
+  }
+
+  return normalized.split(":")[0];
+}
+
+function matchAllowedHostPattern(host: string, pattern: string, includePort: boolean) {
+  const normalizedPattern = normalizeHostForAllowlist(pattern, includePort);
+
+  if (!normalizedPattern || /[\r\n/\\;]/.test(normalizedPattern)) {
+    return false;
+  }
+
+  if (normalizedPattern.startsWith("*.")) {
+    const suffix = normalizedPattern.slice(1);
+    return host.endsWith(suffix) && host.length > suffix.length;
+  }
+
+  return host === normalizedPattern;
 }
 
 function normalizeTrustedProxyConfig(config: LitoTrustedProxyConfig | undefined): NormalizedTrustedProxyConfig {
@@ -1448,6 +1681,52 @@ function isSafeForwardedProtocol(value: string | undefined): value is string {
 
 function isSafeForwardedHost(value: string | undefined): value is string {
   return Boolean(value && !/[\r\n/\\;]/.test(value));
+}
+
+function normalizeOrigin(value: string | null) {
+  if (!value || value === "null" || /[\r\n]/.test(value)) {
+    return null;
+  }
+
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return null;
+    }
+
+    return url.origin;
+  } catch {
+    return null;
+  }
+}
+
+function isAllowedOrigin(
+  origin: string,
+  context: LitoMiddlewareContext,
+  options: {
+    allowSameOrigin: boolean;
+    allowedOrigins: readonly LitoAllowedOrigin[];
+  }
+) {
+  if (options.allowSameOrigin && origin === createRequestOrigin(context)) {
+    return true;
+  }
+
+  return options.allowedOrigins.some((allowedOrigin) => {
+    if (typeof allowedOrigin === "function") {
+      return allowedOrigin(origin, context);
+    }
+
+    if (allowedOrigin instanceof RegExp) {
+      return allowedOrigin.test(origin);
+    }
+
+    return normalizeOrigin(allowedOrigin) === origin;
+  });
+}
+
+function createRequestOrigin(context: Pick<LitoRequestContext, "host" | "protocol">) {
+  return `${context.protocol}://${context.host}`;
 }
 
 function createStaticAssetResponse(root: string, pathname: string) {
@@ -2173,6 +2452,16 @@ function recreateRequestWithBody(request: Request, body: Uint8Array) {
   } as RequestInit & { duplex?: "half" });
 }
 
+function recreateRequestWithSignal(request: Request, signal: AbortSignal) {
+  try {
+    return new Request(request, {
+      signal
+    });
+  } catch {
+    return request;
+  }
+}
+
 function concatUint8Arrays(chunks: Uint8Array[], totalLength: number) {
   const output = new Uint8Array(totalLength);
   let offset = 0;
@@ -2211,6 +2500,37 @@ async function createBodyLimitResponse(
         message: "Payload Too Large",
         limit: input.limit,
         received: input.received
+      }
+    },
+    {
+      status: input.status
+    }
+  );
+}
+
+async function createRequestTimeoutResponse(
+  context: LitoMiddlewareContext,
+  input: {
+    options: LitoRequestTimeoutOptions;
+    status: number;
+    timeoutMs: number;
+  }
+) {
+  if (input.options.response) {
+    return typeof input.options.response === "function"
+      ? await input.options.response({
+          ...context,
+          timeoutMs: input.timeoutMs
+        })
+      : input.options.response;
+  }
+
+  return json(
+    {
+      ok: false,
+      error: {
+        message: "Request Timeout",
+        timeoutMs: input.timeoutMs
       }
     },
     {
