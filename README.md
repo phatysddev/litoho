@@ -196,6 +196,7 @@ Generated apps include:
 - `vite.config.ts`
 
 Files inside `public/` are served directly by the Node app, so URLs like `/logo.png`, `/robots.txt`, and `/sitemap.xml` work without custom routing.
+New apps also include `public/favicon.svg` and the root layout links it with `document.links`, so changing the browser icon is usually just replacing that file. If you prefer an ICO file, place `public/favicon.ico` and point the icon link to `/favicon.ico`.
 
 ## Publishing
 

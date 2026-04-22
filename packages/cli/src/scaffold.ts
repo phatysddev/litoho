@@ -791,6 +791,12 @@ const layout: LitoLayoutModule<{ appName: string }> = {
   load: () => ({
     appName: "Litoho App"
   }),
+  document: {
+    title: "Litoho App",
+    links: [
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }
+    ]
+  },
   render: ({ children, data }) => html\`
     <div class="min-h-screen bg-transparent">
       <header class="sticky top-0 z-10 border-b border-white/10 bg-slate-950/65 backdrop-blur">
@@ -846,6 +852,19 @@ Allow: /
   <rect width="160" height="160" rx="36" fill="#07111f"/>
   <path d="M44 40h20v60h52v20H44V40z" fill="#facc15"/>
   <path d="M86 40h30v20H86V40z" fill="#dbe7f5"/>
+</svg>
+`
+    );
+  }
+
+  const faviconPath = resolve(rootDir, "public/favicon.svg");
+  if (!existsSync(faviconPath)) {
+    writeFileSync(
+      faviconPath,
+      `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#07111f"/>
+  <path d="M18 14h9v27h23v9H18V14z" fill="#facc15"/>
+  <path d="M37 14h13v9H37V14z" fill="#dbe7f5"/>
 </svg>
 `
     );

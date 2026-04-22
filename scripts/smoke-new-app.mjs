@@ -115,7 +115,8 @@ function verifyScaffoldedFiles() {
     "app/pages/_layout.ts",
     "app/api/health.ts",
     "public/robots.txt",
-    "public/logo.svg"
+    "public/logo.svg",
+    "public/favicon.svg"
   ];
 
   const missingFiles = requiredFiles.filter((relativePath) => !existsSync(resolve(appRoot, relativePath)));

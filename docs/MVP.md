@@ -53,7 +53,7 @@ Confirm:
 - one nested page renders
 - one API route responds
 - one dynamic route responds
-- `public/logo.png` or another public asset loads
+- `public/logo.svg`, `public/favicon.svg`, or another public asset loads
 
 ## Docs Gate
 

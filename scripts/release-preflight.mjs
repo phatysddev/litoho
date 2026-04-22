@@ -220,8 +220,16 @@ function validatePublicAssetSupport() {
       ok: scaffoldSource.includes('public/robots.txt')
     },
     {
+      label: "new app public favicon.svg",
+      ok: scaffoldSource.includes('public/favicon.svg')
+    },
+    {
       label: "dist scaffold public robots.txt",
       ok: scaffoldDist.includes('public/robots.txt')
+    },
+    {
+      label: "dist scaffold public favicon.svg",
+      ok: scaffoldDist.includes('public/favicon.svg')
     }
   ];
 
