@@ -1,6 +1,6 @@
 {
   "name": "@litoho/app",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "type": "module",
   "license": "MIT",
   "repository": {
@@ -30,7 +30,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
-    "@litoho/server": "^0.1.3",
+    "@litoho/server": "^0.1.4",
     "lit": "^3.0.0"
   }
 }

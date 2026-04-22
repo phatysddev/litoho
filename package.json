@@ -1,7 +1,7 @@
 {
   "name": "litoho-monorepo",
   "private": true,
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "Litoho monorepo scaffold",
   "license": "MIT",
   "repository": {
